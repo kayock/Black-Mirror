@@ -1,0 +1,32 @@
+{
+  "id": "llamacpp-sycl",
+  "family": "llama.cpp",
+  "displayName": "llama.cpp (SYCL)",
+  "api": "openai",
+  "serverBinary": "llama-server",
+  "acceleration": "gpu-sycl",
+  "os": ["win32"],
+  "arch": ["x64"],
+  "capabilities": {
+    "thinking": "reasoning-format",
+    "images": false,
+    "embeddings": true,
+    "logitTimingLogs": true
+  },
+  "hardware": {
+    "requirements": ["Intel oneAPI Level Zero runtime / Intel graphics driver with Compute Runtime"],
+    "notes": "SYCL build targets Intel GPUs through Level Zero. Requires the Intel compute runtime; on a clean Windows install with only the display driver it may fail to find a device — the app reports this honestly rather than pretending to run. Install 'Intel oneAPI Base Toolkit' or the standalone compute runtime if the device is not detected."
+  },
+  "install": {
+    "type": "github-release-zip",
+    "repo": "ggml-org/llama.cpp",
+    "assetTemplate": "llama-{tag}-bin-win-sycl-x64.zip",
+    "stableTagPointer": "https://github.com/ggml-org/llama.cpp/releases/download/v1.0.0/nightly-tag.txt",
+    "fallbackTagStrategy": "latest-b-release"
+  },
+  "versionProbe": { "type": "cli", "args": ["--version"], "regex": "version:\\s*(\\d+)\\s*\\((\\w+)\\)" },
+  "readyProbe": { "type": "http", "path": "/health", "expect": 200 },
+  "defaultPort": 8083,
+  "defaultBind": "127.0.0.1",
+  "models": "gguf-path"
+}

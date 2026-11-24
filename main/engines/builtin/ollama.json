@@ -1,0 +1,30 @@
+{
+  "id": "ollama",
+  "family": "ollama",
+  "displayName": "Ollama",
+  "api": "openai",
+  "serverBinary": "ollama",
+  "acceleration": "engine-managed",
+  "os": ["win32"],
+  "arch": ["x64", "arm64"],
+  "capabilities": {
+    "thinking": "request-flag",
+    "images": true,
+    "embeddings": true,
+    "logitTimingLogs": false
+  },
+  "hardware": {
+    "requirements": [],
+    "notes": "Ollama manages its own model store and acceleration (CPU, Intel/AMD/NVIDIA when supported by its runtime). Black Mirror treats it as an externally managed service: it can start/stop `ollama serve` processes it launched itself and connect to an already-running service, but never terminates Ollama processes it did not start."
+  },
+  "install": {
+    "type": "download-run-installer",
+    "url": "https://ollama.com/download/OllamaSetup.exe",
+    "notes": "Runs the official Ollama installer. Requires user interaction on Windows."
+  },
+  "versionProbe": { "type": "cli", "args": ["--version"], "regex": "ollama version is\\s+(\\S+)" },
+  "readyProbe": { "type": "http", "path": "/", "expect": 200 },
+  "defaultPort": 11434,
+  "defaultBind": "127.0.0.1",
+  "models": "ollama-registry"
+}

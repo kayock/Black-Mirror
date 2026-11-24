@@ -1,0 +1,33 @@
+{
+  "id": "llamacpp-vulkan",
+  "family": "llama.cpp",
+  "displayName": "llama.cpp (Vulkan)",
+  "api": "openai",
+  "serverBinary": "llama-server",
+  "acceleration": "gpu-vulkan",
+  "os": ["win32"],
+  "arch": ["x64", "arm64"],
+  "capabilities": {
+    "thinking": "reasoning-format",
+    "images": false,
+    "embeddings": true,
+    "logitTimingLogs": true
+  },
+  "hardware": {
+    "requirements": ["Vulkan-capable GPU or iGPU with updated driver"],
+    "notes": "Intel UHD 770 (Alder Lake) exposes Vulkan 1.1-1.3 via the Intel graphics driver. Offloading all layers of large models to UHD 770 shared memory is usually slower than CPU; partial offload (-ngl 5..20) or small models work best."
+  },
+  "install": {
+    "type": "github-release-zip",
+    "repo": "ggml-org/llama.cpp",
+    "assetTemplate": "llama-{tag}-bin-win-vulkan-x64.zip",
+    "assetTemplateArm64": "llama-{tag}-bin-win-vulkan-arm64.zip",
+    "stableTagPointer": "https://github.com/ggml-org/llama.cpp/releases/download/v1.0.0/nightly-tag.txt",
+    "fallbackTagStrategy": "latest-b-release"
+  },
+  "versionProbe": { "type": "cli", "args": ["--version"], "regex": "version:\\s*(\\d+)\\s*\\((\\w+)\\)" },
+  "readyProbe": { "type": "http", "path": "/health", "expect": 200 },
+  "defaultPort": 8082,
+  "defaultBind": "127.0.0.1",
+  "models": "gguf-path"
+}

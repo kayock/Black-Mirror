@@ -1,0 +1,32 @@
+{
+  "id": "lemonade",
+  "family": "lemonade",
+  "displayName": "Lemonade Server",
+  "api": "openai",
+  "serverBinary": "lemonade-server",
+  "acceleration": "engine-managed",
+  "os": ["win32"],
+  "arch": ["x64"],
+  "capabilities": {
+    "thinking": "unsupported",
+    "images": false,
+    "embeddings": true,
+    "logitTimingLogs": false
+  },
+  "hardware": {
+    "requirements": ["AMD Ryzen AI (XDNA NPU) or Intel/AMD GPU for accelerated paths; CPU fallback"],
+    "notes": "Lemonade (by AMD Labs) serves OpenAI-compatible APIs with ONNX Runtime and llama.cpp backends, optimized for Ryzen AI NPUs and integrated GPUs. The embeddable zip is fully portable. GGUF models are supported via its llama.cpp backend; ONNX models come from Lemonade's own model registry."
+  },
+  "install": {
+    "type": "github-release-zip",
+    "repo": "lemonade-sdk/lemonade",
+    "assetTemplate": "lemonade-embeddable-{tag}-windows-x64.zip",
+    "stableTagPointer": "https://api.github.com/repos/lemonade-sdk/lemonade/releases/latest",
+    "fallbackTagStrategy": "github-api-latest"
+  },
+  "versionProbe": { "type": "cli", "args": ["-v"], "regex": "([0-9]+\\.[0-9]+\\.[0-9]+)" },
+  "readyProbe": { "type": "http", "path": "/api/v1/health", "expect": 200 },
+  "defaultPort": 8000,
+  "defaultBind": "127.0.0.1",
+  "models": "lemonade-registry"
+}
