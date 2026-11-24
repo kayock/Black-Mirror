@@ -135,6 +135,73 @@ describe('Server controller', () => {
     fs.rmSync(dir, { recursive: true, force: true });
   });
 
+  test('restart refuses replacement when stop is unresolved (no duplicate)', async () => {
+    const { dir, ctl } = makeController('restart-unresolved');
+    const port = await freePort();
+    const first = await ctl.start({
+      engineId: 'llamacpp-cpu',
+      modelPath: '/m/ru.gguf',
+      port,
+      bind: '127.0.0.1',
+      params: {}
+    });
+    const runningBefore = ctl.list().filter(s => s.status === 'running').length;
+    assert.equal(runningBefore, 1);
+
+    // Simulate an unresolved stop without actually killing the child — restart
+    // must abort before spawning a replacement.
+    const realStop = ctl.stop.bind(ctl);
+    ctl.stop = async () => ({
+      id: first.id,
+      pid: first.pid,
+      killed: false,
+      exitObserved: false,
+      pidAliveAfter: true,
+      portReleased: false,
+      httpDown: false,
+      confirmed: false
+    });
+
+    await assert.rejects(
+      () => ctl.restart(first.id),
+      e => e.code === 'stop-unresolved'
+        && /not confirmed/.test(e.message)
+        && /replacement was not started/.test(e.message)
+    );
+
+    const still = ctl.list().filter(s => s.status === 'running');
+    assert.equal(still.length, 1, 'original managed server remains the only running entry');
+    assert.equal(still[0].pid, first.pid, 'no replacement PID was spawned');
+
+    ctl.stop = realStop;
+    const confirmed = await ctl.stop(first.id);
+    assert.equal(confirmed.confirmed, true);
+    fs.rmSync(dir, { recursive: true, force: true });
+  });
+
+  test('restart of remote-mode record is refused (ownership safeguard)', async () => {
+    const { dir, ctl } = makeController('restart-remote');
+    // Remotes live outside the managed map; if a remote-mode record is ever
+    // resolved, restart must refuse rather than stop/start it.
+    ctl.processes.set('remote-fake', {
+      id: 'remote-fake',
+      mode: 'remote',
+      engineId: 'remote',
+      model: null,
+      port: 19999,
+      bind: '127.0.0.1',
+      params: {},
+      status: 'running',
+      displayName: 'ext'
+    });
+    await assert.rejects(
+      () => ctl.restart('remote-fake'),
+      e => e.code === 'not-owned' && /never restarted/i.test(e.message)
+    );
+    ctl.processes.delete('remote-fake');
+    fs.rmSync(dir, { recursive: true, force: true });
+  });
+
   test('stopAll shuts everything down (clean app shutdown)', async () => {
     const { dir, ctl } = makeController('stopall');
     const ports = [await freePort(), await freePort()];

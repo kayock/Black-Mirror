@@ -61,6 +61,8 @@ function initCore() {
     dataDir: dd,
     onEvent: e => {
       send('server-event', e);
+      // Live log stream uses its own channel (Servers view subscribes to it).
+      if (e.event === 'server-log') send('server-log', e);
       if (e.event === 'server-ready') send('server-state', controller.list());
       if (e.event === 'server-exit') setTimeout(() => send('server-state', controller.list()), 100);
     }
@@ -74,8 +76,8 @@ function initCore() {
   benchStore = new JsonStore(path.join(dd, 'benchmarks.json'), { results: [] });
   benchStore.load();
   lab = new CompatibilityLab(controller, registry, logger, {
-    dataDir,
-    appVersion: app.getVersion ? app.getVersion() : '1.2.0',
+    dataDir: dd,
+    appVersion: app.getVersion ? app.getVersion() : '1.2.1',
     onEvent: e => send('lab-progress', e)
   });
   diagnostics = new Diagnostics({ appVersion: lab.appVersion, logger, registry, installer, library, controller, lab, monitor });

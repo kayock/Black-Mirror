@@ -53,19 +53,49 @@ test('app main entry modules load without require errors under the electron bina
   }
 });
 
+test('main.js wires CompatibilityLab with resolved dataDir string (not the function)', () => {
+  // Regression for v1.2.1: passing `dataDir` (the function) instead of `dd`
+  // made JsonStore mkdir the function source text and aborted GUI startup.
+  const src = fs.readFileSync(path.join(ROOT, 'main', 'main.js'), 'utf8');
+  assert.match(src, /new CompatibilityLab\([\s\S]*?dataDir:\s*dd[\s\S]*?\)/);
+  assert.doesNotMatch(src, /new CompatibilityLab\([\s\S]*?\bdataDir\s*,/);
+});
+
+test('preload allowlist includes server-log (Servers view live log stream)', () => {
+  const src = fs.readFileSync(path.join(ROOT, 'main', 'preload.cjs'), 'utf8');
+  assert.match(src, /['"]server-log['"]/);
+  const main = fs.readFileSync(path.join(ROOT, 'main', 'main.js'), 'utf8');
+  assert.match(main, /send\(['"]server-log['"]/);
+});
+
 test('electron GUI runtime launch (only with a display)', { skip: (function () {
   if (!electronAvailable()) return 'electron binary not installed';
   if (process.platform === 'linux' && !process.env.DISPLAY && !fs.existsSync('/tmp/.X11-unix/X0')) return 'no display in this sandbox — GUI launch documented as not verified here';
   return false;
 })() }, async t => {
-  const child = spawn(ELECTRON, ['.'], { cwd: ROOT, env: { ...process.env }, stdio: ['ignore', 'pipe', 'pipe'] });
+  const dataDir = fs.mkdtempSync(path.join(require('os').tmpdir(), 'bm-gui-'));
+  const child = spawn(ELECTRON, ['.'], {
+    cwd: ROOT,
+    env: { ...process.env, BLACK_MIRROR_DATA_DIR: dataDir },
+    stdio: ['ignore', 'pipe', 'pipe']
+  });
   let out = '';
   child.stdout.on('data', d => { out += d; });
   child.stderr.on('data', d => { out += d; });
   const result = await new Promise(resolve => {
-    const timer = setTimeout(() => resolve({ booted: /ready|window|main/i.test(out) }), 15000);
-    child.on('exit', (code) => { clearTimeout(timer); resolve({ booted: code === 0, code }); });
+    const timer = setTimeout(() => {
+      const crashed = /ENOENT|UnhandledPromiseRejection|Fatal|Cannot find module/i.test(out);
+      const logged = fs.existsSync(path.join(dataDir, 'logs')) &&
+        fs.readdirSync(path.join(dataDir, 'logs')).some(f => f.startsWith('blackmirror-'));
+      const alive = child.exitCode === null && !child.killed;
+      resolve({ booted: !crashed && (alive || logged || /ready|window|main/i.test(out)), out, alive, logged, crashed });
+    }, 12000);
+    child.on('exit', (code) => {
+      clearTimeout(timer);
+      resolve({ booted: code === 0, code, out });
+    });
   });
-  child.kill('SIGTERM');
-  assert.ok(result.booted, `electron GUI did not boot: ${out.slice(0, 400)}`);
+  try { child.kill(); } catch (_) { /* already gone */ }
+  try { fs.rmSync(dataDir, { recursive: true, force: true }); } catch (_) { /* ignore */ }
+  assert.ok(result.booted, `electron GUI did not boot: ${String(result.out || out).slice(0, 600)}`);
 });

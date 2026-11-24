@@ -233,7 +233,7 @@ const CompatLabView = (() => {
   }
 
   function exportResults() {
-    const blob = new Blob([JSON.stringify({ exportedAt: new Date().toISOString(), app: 'Black Mirror v1.2.0', results: state.results }, null, 2)], { type: 'application/json' });
+    const blob = new Blob([JSON.stringify({ exportedAt: new Date().toISOString(), app: 'Black Mirror v1.2.1', results: state.results }, null, 2)], { type: 'application/json' });
     const a = document.createElement('a');
     a.href = URL.createObjectURL(blob);
     a.download = 'black-mirror-compat-results.json';

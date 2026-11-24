@@ -2,7 +2,7 @@
 
 **Your Machine. Your Models. Your Intelligence.**
 
-Black Mirror v1.1.0 is a local LLM chat application, model library and inference server controller for Windows. It gives your existing GGUF models a fast, dark, focused interface — and keeps every inference engine independently replaceable, so the app evolves with the engine ecosystem instead of being welded to one of them.
+Black Mirror **v1.2.1** is a local LLM chat application, model library, inference engine manager, server controller, compatibility laboratory and benchmarking app for Windows. It gives your existing GGUF models a fast, dark, focused interface — and keeps every inference engine independently replaceable, so the app evolves with the engine ecosystem instead of being welded to one of them.
 
 Everything runs locally: no cloud services, no accounts, no subscriptions. Chat traffic never leaves your machine unless *you* deliberately expose it to your LAN.
 
@@ -36,17 +36,25 @@ Rendered from the production UI (Electron renderer) in headless Chromium via the
 | Benchmark Laboratory | `docs/screenshots/benchmarks.png` |
 | Settings (network, defaults, diagnostics) | `docs/screenshots/settings.png` |
 
+## Windows download
+
+Packaged Windows builds ship on **GitHub Releases** (large binaries are not committed to the source tree):
+
+- **Portable zip:** `Black Mirror-1.2.1-win.zip` — extract anywhere and run `Black Mirror.exe`.
+- Optional desktop shortcut; application state lives under `%APPDATA%\BlackMirror\`.
+- Inference engines install into that data directory only — never into your model folders.
+
 ## Requirements
 
 - Windows 10/11, 64-bit (development runs on Linux/macOS too)
-- Node.js ≥ 18 (only for building from source; the packaged installer has no Node dependency)
-- No dedicated GPU required — the default engine targets pure CPU. Designed and optimized against: **Intel Core i5-12500, 44 GB RAM, Intel UHD 770 iGPU**.
+- Node.js ≥ 18 (only for building from source; the packaged app has no Node dependency)
+- No dedicated GPU required — the default engine targets pure CPU. Validated on Intel Core i5-12500 class CPUs with Intel UHD 770 iGPU and ~32–64 GB RAM.
 
 ## Quick start (source)
 
 ```powershell
 # 1. Install Node.js 18+ from https://nodejs.org, then:
-git clone <your-repo> black-mirror
+git clone https://github.com/kayock/Black-Mirror.git black-mirror
 cd black-mirror
 powershell -ExecutionPolicy Bypass -File scripts\setup-windows.ps1
 
@@ -78,7 +86,7 @@ Or double-click `scripts\setup.cmd` for a one-click setup+start.
 npm test
 ```
 
-116 automated tests across 10 files (GGUF parsing + split detection, memory estimation + commit-charge assessment, model library + mmproj, engine registry & adapters + capability gating, installer + release-asset fallback, server controller + remote endpoints, ports, log parsing, conversations, config, monitor, benchmark pipeline + TTFT, streaming client) — all runnable without Electron or Windows.
+**120** automated tests (GGUF parsing + split detection, memory estimation + commit-charge assessment, model library + mmproj, engine registry & adapters + capability gating, installer + release-asset fallback, server controller + verified restart, ports, log parsing, conversations, config, monitor, benchmark pipeline + TTFT, streaming client, Electron runtime + Windows ownership probes) — the unit suite runs without a display; GUI launch is verified on Windows.
 
 ## Using the OpenAI-compatible API
 
@@ -108,8 +116,18 @@ No API key is required — there is no authentication by design; the default `12
 - Uninstalling an engine version deletes only files inside `%APPDATA%\BlackMirror\engines\`.
 - The API binds to `127.0.0.1` by default. Switching to `0.0.0.0` exposes it to your LAN — there is no authentication by design, and the UI says so.
 
+## Known limitations
+
+- Vulkan / SYCL backends must be installed through Inference Engines and require a working GPU driver stack; they are never presented as functional without evidence.
+- The Windows portable build is unsigned — SmartScreen may warn on first launch (“More info → Run anyway”).
+- Large MoE / 30B+ models need careful memory planning; use Compatibility Lab and the pre-load assessment.
+- Remote endpoints are connect-only: Black Mirror will not stop processes it did not start.
+- Windows verification details: [WINDOWS_VERIFICATION_RESULTS.md](docs/WINDOWS_VERIFICATION_RESULTS.md).
+
 ## License
 
 MIT — see [LICENSE](LICENSE).
+
+**BLACK MIRROR** — *Your Machine. Your Models. Your Intelligence.*
 
 *The intelligence changes. The mirror remains.*

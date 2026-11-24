@@ -64,7 +64,7 @@ describe('Build manifest reproducibility', () => {
     // this test documents the distinction the audit demanded.
     const prod = { name: pkg.name, version: pkg.version, main: pkg.main, dependencies: pkg.dependencies };
     assert.ok(!('scripts' in prod) && !('devDependencies' in prod), 'production manifest must not carry dev tooling');
-    assert.equal(prod.version, '1.2.0');
+    assert.equal(prod.version, '1.2.1');
   });
 });
 
@@ -263,7 +263,9 @@ describe('Engine install staging & update safety', () => {
     assert.throws(() => installer._validateStaged(desc, dir), /does not contain the expected llama-server/, 'empty staging refused');
     const subdir = path.join(dir, 'build', 'bin');
     fs.mkdirSync(subdir, { recursive: true });
-    fs.writeFileSync(path.join(subdir, 'llama-server'), '#!/bin/sh\n');
+    // Host-platform binary name: installer requires .exe on Windows.
+    const binName = process.platform === 'win32' ? 'llama-server.exe' : 'llama-server';
+    fs.writeFileSync(path.join(subdir, binName), process.platform === 'win32' ? 'MZ' : '#!/bin/sh\n');
     const ok = installer._validateStaged(desc, dir);
     assert.equal(ok.ok, true);
     fs.rmSync(dir, { recursive: true, force: true });
@@ -284,7 +286,7 @@ describe('Compatibility assessment', () => {
   });
 
   test('verified-compatible only from a fresh PASSING lab result with inference stage', () => {
-    const saved = { outcome: 'pass', stages: [{ stage: 'inference', ok: true }], at: Date.now(), modelMtimeMs: 1, engineTag: 'b1', appVersion: '1.2.0' };
+    const saved = { outcome: 'pass', stages: [{ stage: 'inference', ok: true }], at: Date.now(), modelMtimeMs: 1, engineTag: 'b1', appVersion: '1.2.1' };
     const cfg = { modelMtimeMs: 1, engineTag: 'b1' };
     const r = assessCompatibility({ model: goodModel, engine: cpuEngine, hardware: {}, memory: {}, savedResult: saved, requested: { accel: 'cpu', params: {} }, ...cfg });
     assert.equal(r.status, STATUS.VERIFIED);
@@ -295,7 +297,7 @@ describe('Compatibility assessment', () => {
   });
 
   test('previously-failed surfaces failed stages', () => {
-    const saved = { outcome: 'fail', stages: [{ stage: 'load', ok: false, detail: 'boom' }], at: Date.now(), appVersion: '1.2.0', modelMtimeMs: 1, engineTag: 'b1' };
+    const saved = { outcome: 'fail', stages: [{ stage: 'load', ok: false, detail: 'boom' }], at: Date.now(), appVersion: '1.2.1', modelMtimeMs: 1, engineTag: 'b1' };
     const r = assessCompatibility({ model: goodModel, engine: cpuEngine, hardware: {}, memory: {}, savedResult: saved, requested: { accel: 'cpu', params: {} } });
     assert.equal(r.status, STATUS.FAILED);
     assert.match(r.reasons[0], /load/);
@@ -331,14 +333,14 @@ describe('Compatibility Lab persistence & staleness', () => {
     const logger = new Logger(path.join(dir, 'logs'));
     const reg = new EngineRegistry(dir, console, { osFilter: false });
     const ctl = new ServerController({ descriptor: () => { throw new Error('unused'); } }, logger, { dataDir: dir });
-    return new CompatibilityLab(ctl, reg, logger, { dataDir: dir, appVersion: '1.2.0' });
+    return new CompatibilityLab(ctl, reg, logger, { dataDir: dir, appVersion: '1.2.1' });
   }
 
   test('saved result becomes stale when model mtime or engine tag changes', () => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'bm-lab-'));
     const lab = makeLab(dir);
     const cfg = { modelPath: '/m/a.gguf', modelMtimeMs: 100, engineId: 'llamacpp-cpu', engineTag: 'b1', accel: 'cpu', profileKey: 'manual' };
-    lab.store.data.results = [{ ...lab.keyFor(cfg), stages: [], outcome: 'pass', at: Date.now(), appVersion: '1.2.0', profileParams: null }];
+    lab.store.data.results = [{ ...lab.keyFor(cfg), stages: [], outcome: 'pass', at: Date.now(), appVersion: '1.2.1', profileParams: null }];
     lab.store.save();
     const fresh = lab.latestResultFor(cfg);
     assert.equal(fresh.stale, undefined, 'matching inputs → not stale');
@@ -435,15 +437,15 @@ describe('Diagnostics center', () => {
     const ctl = new ServerController({ descriptor: () => { throw new Error('x'); } }, logger, { dataDir: dir });
     const { CompatibilityLab } = require('../main/compatlab/lab');
     const lab = new CompatibilityLab(ctl, reg, logger, { dataDir: dir });
-    const diag = new Diagnostics({ appVersion: '1.2.0', logger, registry: reg, installer: null, library, controller: ctl, lab, monitor: null });
+    const diag = new Diagnostics({ appVersion: '1.2.1', logger, registry: reg, installer: null, library, controller: ctl, lab, monitor: null });
     const snap = await diag.collect();
-    assert.equal(snap.app.version, '1.2.0');
+    assert.equal(snap.app.version, '1.2.1');
     assert.ok(Array.isArray(snap.engines) && snap.engines.length >= 5, 'engine table populated');
     assert.ok(snap.models && typeof snap.models.total === 'number');
     assert.ok(Array.isArray(snap.hints) && snap.hints.length, 'hints generated');
     const file = await diag.exportReport(dir);
     const body = JSON.parse(fs.readFileSync(file, 'utf8'));
-    assert.equal(body.app.version, '1.2.0');
+    assert.equal(body.app.version, '1.2.1');
     assert.match(file, /black-mirror-diagnostics-/);
     fs.rmSync(dir, { recursive: true, force: true });
   });
@@ -451,7 +453,7 @@ describe('Diagnostics center', () => {
   test('hints detect port conflict, experimental engine and low commit headroom', async () => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'bm-diag2-'));
     const { Logger } = require('../main/core/log');
-    const diag = new Diagnostics({ appVersion: '1.2.0', logger: new Logger(null), registry: { hardwareInfo: () => ({}) }, library: { list: () => [] }, controller: { list: () => [], recoveredExternal: [] }, lab: { results: () => [] }, monitor: null });
+    const diag = new Diagnostics({ appVersion: '1.2.1', logger: new Logger(null), registry: { hardwareInfo: () => ({}) }, library: { list: () => [] }, controller: { list: () => [], recoveredExternal: [] }, lab: { results: () => [] }, monitor: null });
     const snap = { engines: [{ displayName: 'SYCL', statusCategory: 'experimental', installed: true, version: 'b1' }], models: { invalid: 2, incompleteSplits: 1 }, portConflicts: [{ port: 8081, occupied: true }], unverifiedRecovered: [{ pid: 5, reason: 'start time mismatch — PID was likely reused by another process' }], memorySample: { memory: { committedFreeBytes: 1e9 } }, compatResults: [], recentErrors: [] };
     const hints = diag.hints(snap);
     assert.ok(hints.some(h => /port 8081 is already occupied/.test(h)));

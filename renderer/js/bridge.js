@@ -183,8 +183,8 @@ class MockBridge {
       { stage: 'streaming', ok: true, status: 'pass', detail: '14 SSE chunks, TTFT 312 ms' },
       { stage: 'thinking', ok: true, status: 'pass', detail: 'on → "reasoning-format", off → "enable_thinking:false" (explicit disable verified)' },
       { stage: 'terminate', ok: true, status: 'pass', detail: 'pid 41248 exit observed, port released' }
-    ], measured: { loadMs: 18432, ttftMs: 312 }, at: Date.now(), appVersion: '1.2.0' }),
-    results: () => Promise.resolve([{ modelPath: 'C:\\models\\qwen3-8b-q6_k.gguf', engineId: 'llamacpp-vulkan', engineTag: 'b12359', accel: 'gpu-vulkan', profileKey: 'manual', outcome: 'pass', stale: false, staleReason: null, at: Date.now() - 86400000, appVersion: '1.2.0' }]),
+    ], measured: { loadMs: 18432, ttftMs: 312 }, at: Date.now(), appVersion: '1.2.1' }),
+    results: () => Promise.resolve([{ modelPath: 'C:\\models\\qwen3-8b-q6_k.gguf', engineId: 'llamacpp-vulkan', engineTag: 'b12359', accel: 'gpu-vulkan', profileKey: 'manual', outcome: 'pass', stale: false, staleReason: null, at: Date.now() - 86400000, appVersion: '1.2.1' }]),
     invalidate: () => Promise.resolve(0)
   };
   profiles = {
@@ -198,7 +198,7 @@ class MockBridge {
   diagnostics = {
     snapshot: () => Promise.resolve({
       generatedAt: new Date().toISOString(),
-      app: { version: '1.2.0', platform: 'win32', arch: 'x64', node: '24.22.3', electron: '(preview)', uptimeSec: 120 },
+      app: { version: '1.2.1', platform: 'win32', arch: 'x64', node: '24.22.3', electron: '(preview)', uptimeSec: 120 },
       os: { release: '10.0.26200', hostname: 'DESKTOP-EX', totalMem: 47.2e9, freeMem: 24.1e9 },
       hardware: { vulkan: 'likely', sycl: 'unknown', cpuModel: '12th Gen Intel(R) Core(TM) i5-12500' },
       memorySample: { memory: { committedFreeBytes: 30.1e9 } },
@@ -239,7 +239,7 @@ class MockBridge {
     }
   }
   platform = 'preview';
-  versions = { app: '1.2.0', electron: '(preview)' };
+  versions = { app: '1.2.1', electron: '(preview)' };
 
   /** Fake streaming chat for the preview: emits a canned answer. */
   async fakeChatStream(onDelta, onReasoning, signal, thinkingMode = 'auto') {

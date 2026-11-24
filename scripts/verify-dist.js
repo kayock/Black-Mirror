@@ -39,14 +39,18 @@ if (!fs.existsSync(asar)) {
 } else {
   ok.push('app.asar present');
   try {
-    const list = execFileSync(path.join(ROOT, 'node_modules', '.bin', process.platform === 'win32' ? 'asar.cmd' : 'asar'), ['list', asar], { encoding: 'utf8', timeout: 60000 });
+    // Prefer invoking the asar JS entry via node — Windows .cmd wrappers can
+    // fail with EINVAL under execFileSync depending on the shell environment.
+    const asarBin = path.join(ROOT, 'node_modules', '@electron', 'asar', 'bin', 'asar.js');
+    const list = execFileSync(process.execPath, [asarBin, 'list', asar], { encoding: 'utf8', timeout: 60000 });
     const entries = list.split('\n');
     for (const marker of ['/main/engines/capabilities.js', '/main/compatlab/lab.js', '/main/profiles.js', '/main/diagnostics.js', '/renderer/vendor/marked.min.js', '/renderer/vendor/highlight.min.js', '/assets/icon.png']) {
-      if (entries.some(e => e.trim() === marker)) ok.push(`asar contains ${marker}`);
-      else problems.push(`asar missing v1.2.0 asset: ${marker}`);
+      const norm = marker.replace(/\\/g, '/');
+      if (entries.some(e => e.trim().replace(/\\/g, '/') === norm || e.trim().replace(/\\/g, '/') === norm.slice(1))) ok.push(`asar contains ${marker}`);
+      else problems.push(`asar missing v1.2.1 asset: ${marker}`);
     }
     const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'asarpkg-'));
-    execFileSync(path.join(ROOT, 'node_modules', '.bin', process.platform === 'win32' ? 'asar.cmd' : 'asar'), ['extract-file', asar, 'package.json'], { cwd: tmp, timeout: 60000 });
+    execFileSync(process.execPath, [asarBin, 'extract-file', asar, 'package.json'], { cwd: tmp, timeout: 60000 });
     const asarPkg = JSON.parse(fs.readFileSync(path.join(tmp, 'package.json'), 'utf8'));
     if (asarPkg.version === pkg.version) ok.push(`packaged manifest reports v${asarPkg.version}`);
     else problems.push(`packaged manifest version ${asarPkg.version} != source ${pkg.version}`);

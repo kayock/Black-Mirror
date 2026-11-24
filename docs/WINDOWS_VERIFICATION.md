@@ -1,6 +1,6 @@
-# WINDOWS VERIFICATION — Black Mirror v1.2.0
+# WINDOWS VERIFICATION — Black Mirror v1.2.1
 
-Status: **pending real-hardware validation**. This document is the practical, isolated procedure for validating v1.2.0 on a Windows 11 x64 machine **without touching any existing models, engine installs, services or configuration**. Everything below was designed so it can be executed by following it literally.
+Status: **in progress on real Windows 11 x64 hardware** (Intel Core i5-12500, Intel UHD 770, ~56 GB RAM). This document is the practical, isolated procedure for validating Black Mirror on a Windows 11 x64 machine **without touching any existing models, engine installs, services or configuration**. Everything below was designed so it can be executed by following it literally. v1.2.1 preserves the v1.2.0 baseline and adds the restart confirmation fix verified during this Windows install.
 
 ## 1. What has and has not been verified, honestly
 

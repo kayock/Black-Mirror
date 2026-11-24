@@ -117,7 +117,7 @@ contextBridge.exposeInMainWorld('blackMirror', {
 
   // push events from main
   on: (channel, handler) => {
-    const allowed = ['server-event', 'server-state', 'monitor-sample', 'engine-install-progress', 'library-updated', 'bench-progress', 'recovery-report', 'lab-progress'];
+    const allowed = ['server-event', 'server-state', 'server-log', 'monitor-sample', 'engine-install-progress', 'library-updated', 'bench-progress', 'recovery-report', 'lab-progress'];
     if (!allowed.includes(channel)) throw new Error(`channel not allowed: ${channel}`);
     const wrapped = (_e, payload) => handler(payload);
     ipcRenderer.on(channel, wrapped);
@@ -126,7 +126,7 @@ contextBridge.exposeInMainWorld('blackMirror', {
 
   platform: process.platform,
   versions: {
-    app: '1.2.0',
+    app: '1.2.1',
     electron: process.versions.electron || null,
     node: process.versions.node || null
   }

@@ -457,12 +457,37 @@ const ownership = require('./ownership');
     return result;
   }
 
-  /** Restart a managed server with the exact same configuration. */
+  /**
+   * Restart a managed server with the exact same configuration.
+   * Requires a confirmed stop (exit observed + port released) before any
+   * replacement process is spawned — otherwise a duplicate inference server
+   * could be left running when termination remains unresolved.
+   */
   async restart(idOrKey) {
     const p = this._resolve(idOrKey);
     if (!p) throw new EngineError(`No managed server "${idOrKey}"`, 'not-found');
-    const opts = { engineId: p.engineId, modelPath: p.model, port: p.port, bind: p.bind, params: p.params, modelDisplayName: p.displayName };
-    await this.stop(idOrKey);
+    if (p.mode === 'remote') throw new EngineError('Remote endpoints are never restarted by Black Mirror', 'not-owned');
+    const opts = {
+      engineId: p.engineId,
+      modelPath: p.model,
+      port: p.port,
+      bind: p.bind,
+      params: p.params,
+      modelDisplayName: p.displayName
+    };
+    const stopResult = await this.stop(idOrKey);
+    if (!stopResult || stopResult.confirmed !== true) {
+      const detail = stopResult
+        ? `exitObserved=${stopResult.exitObserved} alive=${stopResult.pidAliveAfter} portReleased=${stopResult.portReleased} httpDown=${stopResult.httpDown}`
+        : 'no stop result';
+      this.logger.warn('controller', `restart aborted: stop unresolved for ${idOrKey} (${detail})`);
+      const err = new EngineError(
+        `Restart blocked: previous process termination was not confirmed (${detail}). A replacement was not started to avoid duplicate inference processes.`,
+        'stop-unresolved'
+      );
+      err.stopResult = stopResult || null;
+      throw err;
+    }
     await sleep(300);
     return this.start(opts);
   }

@@ -33,7 +33,7 @@ function snapshotProcess(pid, opts = {}) {
   if (!Number.isInteger(pid) || pid <= 0) return null;
   if (process.platform === 'win32') {
     if (opts.psInfo) return opts.psInfo; // injectable for tests
-    return null; // Windows uses powershell probe (not executable in this sandbox)
+    return snapshotProcessWindowsSync(pid);
   }
   const exe = (() => { try { return fs.readlinkSync(`/proc/${pid}/exe`); } catch (_) { return null; } })();
   const cmdlineRaw = _readProc(pid, 'cmdline');
@@ -44,6 +44,41 @@ function snapshotProcess(pid, opts = {}) {
     cmdline: cmdlineRaw ? cmdlineRaw.split('\0').filter(Boolean) : [],
     startTime: _procStartTime(pid)
   };
+}
+
+/**
+ * Synchronous Win32_Process identity probe used by spawn recording and
+ * recoverAtStartup (both are sync call sites). Returns null when the PID
+ * is gone or PowerShell/CIM is unavailable.
+ */
+function snapshotProcessWindowsSync(pid) {
+  const { spawnSync } = require('child_process');
+  const r = spawnSync('powershell.exe', [
+    '-NoProfile', '-NonInteractive', '-Command',
+    `Get-CimInstance Win32_Process -Filter "ProcessId=${Number(pid)}" | Select-Object ProcessId,ExecutablePath,CommandLine,CreationDate | ConvertTo-Json -Compress`
+  ], { windowsHide: true, timeout: 15000, encoding: 'utf8' });
+  if (r.status !== 0 || !r.stdout || !String(r.stdout).trim()) return null;
+  try {
+    const j = JSON.parse(r.stdout);
+    if (!j || !j.ProcessId) return null;
+    return {
+      pid: j.ProcessId,
+      exe: j.ExecutablePath || null,
+      cmdline: j.CommandLine ? _splitWinCmdline(j.CommandLine) : [],
+      startTime: j.CreationDate || null
+    };
+  } catch (_) {
+    return null;
+  }
+}
+
+/** Split a Windows command line while preserving quoted segments. */
+function _splitWinCmdline(cmd) {
+  const out = [];
+  const re = /"([^"]*)"|(\S+)/g;
+  let m;
+  while ((m = re.exec(String(cmd))) !== null) out.push(m[1] !== undefined ? m[1] : m[2]);
+  return out;
 }
 
 /** Quick liveness probe. */
@@ -82,7 +117,7 @@ function verifyOwnership(record, snapshot) {
   return { owned: true, reason: 'executable, command line and start time match the ownership record' };
 }
 
-/** Windows helper: snapshot via Win32_Process (used on real Windows only). */
+/** Async Windows helper: snapshot via Win32_Process (used when callers can await). */
 function snapshotProcessWindows(pid) {
   return new Promise(resolve => {
     execFile('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command',
@@ -92,10 +127,15 @@ function snapshotProcessWindows(pid) {
         try {
           const j = JSON.parse(stdout);
           if (!j || !j.ProcessId) return resolve(null);
-          resolve({ pid: j.ProcessId, exe: j.ExecutablePath || null, cmdline: j.CommandLine ? j.CommandLine.split(/\s+/) : [], startTime: j.CreationDate || null });
+          resolve({
+            pid: j.ProcessId,
+            exe: j.ExecutablePath || null,
+            cmdline: j.CommandLine ? _splitWinCmdline(j.CommandLine) : [],
+            startTime: j.CreationDate || null
+          });
         } catch (_) { resolve(null); }
       });
   });
 }
 
-module.exports = { snapshotProcess, snapshotProcessWindows, isAlive, verifyOwnership };
+module.exports = { snapshotProcess, snapshotProcessWindows, snapshotProcessWindowsSync, isAlive, verifyOwnership };

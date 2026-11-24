@@ -43,7 +43,7 @@
     root.classList.remove('hidden');
     root.innerHTML = '';
     const m = BMUtil.el('div', { class: 'modal glass onboarding' });
-    m.appendChild(BMUtil.el('h3', { text: 'Welcome to Black Mirror v1.1.0' }));
+    m.appendChild(BMUtil.el('h3', { text: 'Welcome to Black Mirror v1.2.1' }));
     m.appendChild(BMUtil.el('p', { class: 'dim', text: 'Three steps to your first local conversation. Everything runs on this machine — no accounts, no cloud, no telemetry.' }));
     for (const st of steps) {
       m.appendChild(BMUtil.el('div', { class: 'onboarding-step' }, [

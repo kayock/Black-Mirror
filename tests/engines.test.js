@@ -201,16 +201,24 @@ describe('Param schema', () => {
 
 describe('Engine installer (mock network)', () => {
   function makeFakeZip() {
-    // build a real zip using the `zip` CLI (present in CI/dev sandbox)
-    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'bm-zip-'));
+    // Build a real zip the installer can Expand-Archive / unzip.
     // Include both platform spellings: staged-binary validation expects the
     // name matching the host platform (llama-server on POSIX, .exe on Windows).
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'bm-zip-'));
     const exe = path.join(tmp, 'llama-server.exe');
     fs.writeFileSync(exe, 'MZfakebinary');
     fs.writeFileSync(path.join(tmp, 'llama-server'), '#!/bin/sh\nMZfakebinary');
     const zip = path.join(tmp, 'fake.zip');
-    const { execSync } = require('child_process');
-    execSync(`cd ${JSON.stringify(tmp)} && zip -q fake.zip llama-server.exe llama-server`);
+    const { spawnSync, execSync } = require('child_process');
+    if (process.platform === 'win32') {
+      const r = spawnSync('powershell.exe', [
+        '-NoProfile', '-NonInteractive', '-Command',
+        `Compress-Archive -LiteralPath @('${exe.replace(/'/g, "''")}','${path.join(tmp, 'llama-server').replace(/'/g, "''")}') -DestinationPath '${zip.replace(/'/g, "''")}' -Force`
+      ], { windowsHide: true, encoding: 'utf8', timeout: 60000 });
+      if (r.status !== 0) throw new Error(`Compress-Archive failed: ${r.stderr || r.stdout || r.status}`);
+    } else {
+      execSync(`cd ${JSON.stringify(tmp)} && zip -q fake.zip llama-server.exe llama-server`);
+    }
     return { zip, tmp };
   }
 

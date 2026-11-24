@@ -1,7 +1,7 @@
 {
   "name": "black-mirror",
   "productName": "Black Mirror",
-  "version": "1.2.0",
+  "version": "1.2.1",
   "description": "Local LLM studio, model library and inference server controller. Your machine. Your models. Your intelligence.",
   "author": "Black Mirror Project",
   "license": "MIT",

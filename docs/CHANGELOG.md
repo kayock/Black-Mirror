@@ -2,6 +2,21 @@
 
 All notable changes to Black Mirror are documented here. Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versioning is semver.
 
+## [1.2.1] — 2026-11-24
+
+Windows hardware verification patch. Preserves the v1.2.0 baseline; ships one confirmed reliability fix discovered during source review and Windows install preparation.
+
+### Fixed
+- **GUI failed to open on Windows**: `initCore()` passed the `dataDir` *function* into `CompatibilityLab` instead of the resolved path string (`dd`). `JsonStore` then tried to `mkdir` a path containing the function source text and the main process aborted before `createWindow()`. Now passes `dataDir: dd`.
+- **Renderer startup aborted on `server-log`**: Servers view subscribed to a `server-log` push channel that was omitted from the preload allowlist, throwing `channel not allowed: server-log` during `ServersView.init()` and stopping the whole bootstrap. Channel allowed; main process now also forwards `server-log` events on that channel.
+- **`restart()` ignored `stop()` confirmation**: restart previously called `stop()` then immediately spawned a replacement process without inspecting the termination verdict. An unresolved stop could therefore leave two inference processes on the same port/model. Restart now requires `stopResult.confirmed === true` before `start()`, throws `stop-unresolved` with an accurate status summary when termination is unresolved, refuses remote-mode records (`not-owned`), and never weakens ownership safeguards. Regression tests cover happy-path restart, unresolved-stop refusal (no duplicate PID), and remote-mode refusal.
+- **Windows process ownership snapshots always returned null**: `snapshotProcess()` short-circuited on `win32`, so spawn recording never stored a start-time and `recoverAtStartup()` could not adopt or correctly classify live processes. It now uses a synchronous Win32_Process PowerShell probe (with quoted command-line splitting) on real Windows hardware.
+- **Installer/unit-test Windows portability**: fake-zip helper uses `Compress-Archive` on Windows (no Unix `zip` CLI); staged-binary validation tests create `llama-server.exe` on Windows to match the installer's host-platform check.
+
+### Changed
+- Automated tests 116 → **118** (+2 restart reliability regressions); Windows host now executes the full suite without POSIX-only helpers.
+- Version indicators, portable package and documentation aligned to **v1.2.1**.
+
 ## [1.2.0] — 2026-11-24
 
 Production-readiness release: manifest reproducibility, verified process termination, crash recovery with process-ownership verification, staged engine installs, Compatibility Lab, recommended profiles, diagnostics center. See PRODUCTION_READINESS.md and REFINEMENT_REPORT.md.
