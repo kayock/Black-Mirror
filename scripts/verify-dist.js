@@ -47,7 +47,7 @@ if (!fs.existsSync(asar)) {
     for (const marker of ['/main/engines/capabilities.js', '/main/compatlab/lab.js', '/main/profiles.js', '/main/diagnostics.js', '/renderer/vendor/marked.min.js', '/renderer/vendor/highlight.min.js', '/assets/icon.png']) {
       const norm = marker.replace(/\\/g, '/');
       if (entries.some(e => e.trim().replace(/\\/g, '/') === norm || e.trim().replace(/\\/g, '/') === norm.slice(1))) ok.push(`asar contains ${marker}`);
-      else problems.push(`asar missing v1.2.1 asset: ${marker}`);
+      else problems.push(`asar missing v1.2.2 asset: ${marker}`);
     }
     const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'asarpkg-'));
     execFileSync(process.execPath, [asarBin, 'extract-file', asar, 'package.json'], { cwd: tmp, timeout: 60000 });

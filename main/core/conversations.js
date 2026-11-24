@@ -35,12 +35,33 @@ class Conversations {
         title: c.title,
         createdAt: c.createdAt,
         updatedAt: c.updatedAt,
-        model: c.model || null,
+        model: this._resolveModel(c),
         engineId: c.engineId || null,
         messageCount: (c.messages || []).length,
         lastMessage: c.messages && c.messages.length ? c.messages[c.messages.length - 1].content.slice(0, 120) : ''
       }))
       .sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0));
+  }
+
+  /**
+   * Prefer conversation-level model; otherwise use the most recent message
+   * that recorded one. Never invent identities when none were stored.
+   */
+  _resolveModel(c) {
+    const clean = (v) => {
+      if (v == null) return null;
+      const s = String(v).trim();
+      if (!s || s === 'undefined' || s === 'null') return null;
+      return s;
+    };
+    const top = clean(c.model);
+    if (top) return top;
+    const msgs = c.messages || [];
+    for (let i = msgs.length - 1; i >= 0; i--) {
+      const m = clean(msgs[i] && msgs[i].model);
+      if (m) return m;
+    }
+    return null;
   }
 
   _load(id) {
@@ -92,9 +113,14 @@ class Conversations {
       ts: Date.now()
     };
     conv.messages.push(m);
+    // Backfill conversation model/engine from the first message that knows them.
+    if (!this._resolveModel({ model: conv.model, messages: [] }) && m.model) {
+      conv.model = m.model;
+    }
+    if (!conv.engineId && m.engineId) conv.engineId = m.engineId;
     if (msg.usage) {
-      conv.stats.promptTokens += msg.usage.prompt_tokens || 0;
-      conv.stats.completionTokens += msg.usage.completion_tokens || 0;
+      if (msg.usage.prompt_tokens != null) conv.stats.promptTokens += msg.usage.prompt_tokens || 0;
+      if (msg.usage.completion_tokens != null) conv.stats.completionTokens += msg.usage.completion_tokens || 0;
     }
     // auto-title from first user message
     if (!conv.titleSet && m.role === 'user' && m.content) {

@@ -34,10 +34,34 @@ const ChatView = (() => {
 
   async function newConv({ silent } = {}) {
     const server = state.servers.find(s => s.status === 'running');
-    state.current = await window.Bridge.chat.create({ model: server ? server.displayName : null });
+    const label = serverModelLabel(server);
+    state.current = await window.Bridge.chat.create({
+      model: label,
+      engineId: server ? (server.engineId || null) : null
+    });
     state.convMessages = [];
     renderMessages();
     if (!silent) renderConvList();
+  }
+
+  /** Never surface JS "undefined" / empty as a model name. */
+  function serverModelLabel(server) {
+    if (!server) return null;
+    const raw = server.displayName
+      || (server.model ? String(server.model).split(/[/\\]/).pop() : null)
+      || null;
+    if (!raw || raw === 'undefined' || raw === 'null') return null;
+    return String(raw).replace(/\.gguf$/i, '');
+  }
+
+  function convModelLabel(c) {
+    const raw = (c && c.model) || null;
+    if (!raw || raw === 'undefined' || raw === 'null') return null;
+    return String(raw).replace(/\.gguf$/i, '');
+  }
+
+  function fmtTok(n) {
+    return (n == null || Number.isNaN(Number(n))) ? 'n/a' : String(n);
   }
 
   function renderConvList() {
@@ -46,10 +70,11 @@ const ChatView = (() => {
     list.innerHTML = '';
     for (const c of state.convs) {
       if (q && !(c.title || '').toLowerCase().includes(q)) continue;
+      const modelText = convModelLabel(c) || 'no model';
       const item = BMUtil.el('div', { class: 'conv-item' + (state.current && state.current.id === c.id ? ' active' : ''), onclick: () => openConv(c.id) }, [
         BMUtil.el('div', { class: 'conv-title', text: c.title || 'Untitled' }),
         BMUtil.el('div', { class: 'conv-sub' }, [
-          BMUtil.el('span', { text: c.model ? c.model.replace(/\.gguf$/, '') : 'no model' }),
+          BMUtil.el('span', { text: modelText }),
           BMUtil.el('span', {}, [
             BMUtil.el('button', { class: 'conv-del', text: '✕', title: 'Delete conversation', onclick: async (e) => {
               e.stopPropagation();
@@ -112,13 +137,20 @@ const ChatView = (() => {
 
     const meta = BMUtil.el('div', { class: 'msg-meta' });
     const bits = [];
-    if (m.model) bits.push(m.model.replace(/\.gguf$/, ''));
-    if (m.usage) bits.push(`${m.usage.prompt_tokens} in · ${m.usage.completion_tokens} out`);
-    if (m.tps) bits.push(BMUtil.formatTps(m.tps));
+    const msgModel = convModelLabel(m);
+    if (msgModel) bits.push(msgModel);
     if (m.usage) {
+      const inTok = fmtTok(m.usage.prompt_tokens);
+      const outTok = fmtTok(m.usage.completion_tokens);
+      let usageBit = `${inTok} in · ${outTok} out`;
+      if (m.usage.reasoning_tokens != null) usageBit += ` · ${fmtTok(m.usage.reasoning_tokens)} think`;
+      bits.push(usageBit);
       const ctxMax = currentContextMax();
-      if (ctxMax) bits.push(`ctx ${Math.min(100, Math.round(100 * m.usage.prompt_tokens / ctxMax))}%`);
+      if (ctxMax && m.usage.prompt_tokens != null) {
+        bits.push(`ctx ${Math.min(100, Math.round(100 * m.usage.prompt_tokens / ctxMax))}%`);
+      }
     }
+    if (m.tps != null && Number.isFinite(m.tps)) bits.push(BMUtil.formatTps(m.tps));
     if (m.stopped) bits.push('stopped');
     if (!live && bits.length) meta.appendChild(BMUtil.el('span', { text: bits.join(' · ') }));
     meta.appendChild(BMUtil.el('span', { text: new Date(m.ts || Date.now()).toLocaleTimeString() }));
@@ -238,7 +270,9 @@ const ChatView = (() => {
     const badge = $('chat-server-badge');
     if (running) {
       badge.className = 'badge badge-on';
-      badge.textContent = `${running.displayName} · :${running.port}`;
+      const model = serverModelLabel(running) || 'model';
+      const engine = running.engineId || running.family || 'engine';
+      badge.textContent = `${model} · ${engine} · :${running.port}`;
       $('api-endpoint-chip').textContent = running.baseUrl + '/v1';
       $('composer-warn').classList.add('hidden');
       populateModelSelect(running);
@@ -253,7 +287,8 @@ const ChatView = (() => {
 
   function populateModelSelect(server) {
     const sel = $('chat-model-select');
-    sel.innerHTML = `<option>${BMUtil.esc(server.displayName)}</option>`;
+    const label = serverModelLabel(server) || 'loaded model';
+    sel.innerHTML = `<option>${BMUtil.esc(label)}</option>`;
     sel.disabled = true;
   }
 
@@ -306,14 +341,26 @@ const ChatView = (() => {
   async function generate(prewrittenText, prewrittenAttachments) {
     const server = activeServer();
     if (!server) return;
+    const modelLabel = serverModelLabel(server);
     const messages = buildApiMessages();
     // ensure last message is the user turn we just added
     const box = $('chat-messages');
-    const live = renderMessage({ role: 'assistant', content: '', ts: Date.now(), model: server.displayName }, true);
+    const live = renderMessage({ role: 'assistant', content: '', ts: Date.now(), model: modelLabel }, true);
     box.appendChild(live);
     box.scrollTop = box.scrollHeight;
     const bubble = live.querySelector('.msg-bubble');
     bubble.innerHTML = '<span class="typing-dots"><span></span><span></span><span></span></span>';
+
+    // Backfill conversation model once we have a known server identity.
+    if (modelLabel && state.current && !convModelLabel(state.current)) {
+      try {
+        state.current = await window.Bridge.chat.setMeta(state.current.id, {
+          model: modelLabel,
+          engineId: server.engineId || null
+        });
+        renderConvList();
+      } catch (_) { /* non-fatal */ }
+    }
 
     state.streaming = true;
     $('btn-send').classList.add('hidden');
@@ -331,8 +378,8 @@ const ChatView = (() => {
       box.scrollTop = box.scrollHeight;
     };
     const onReasoning = (d) => {
-      if (!showThinking) return;
       streamedReasoning += d;
+      if (!showThinking) return;
       const tp = $('chat-thinking');
       tp.classList.remove('hidden');
       $('thinking-content').textContent = streamedReasoning;
@@ -345,6 +392,7 @@ const ChatView = (() => {
     };
 
     const params = (server.params || {});
+    const thinkingMode = params.thinkingMode || 'auto';
     try {
       let result;
       if (window.PreviewMode && typeof window.Bridge.fakeChatStream === 'function') {
@@ -353,29 +401,41 @@ const ChatView = (() => {
           d => onDelta(d),
           d => onReasoning(d),
           state.abort.signal,
-          params.thinkingMode || 'auto'
+          thinkingMode
         );
         result = { ...result, stopped: false };
       } else {
         result = await StreamClient.chat({
           baseUrl: server.baseUrl,
-          model: server.displayName,
+          model: modelLabel || 'default',
           messages,
           params,
-          thinking: params.thinkingMode || 'auto',
+          thinking: thinkingMode,
           engineFamily: server.family || null,
           signal: state.abort.signal,
           onDelta,
           onReasoning
         });
       }
-      const elapsed = (Date.now() - t0) / 1000;
-      const usage = result.usage || { prompt_tokens: null, completion_tokens: Math.round(streamed.length / 4) };
-      const tps = usage.completion_tokens && elapsed > 0 ? usage.completion_tokens / elapsed : null;
-      state.lastPromptTokens = usage.prompt_tokens || state.lastPromptTokens;
+      const usage = result.usage || null;
+      const tps = (result.tps != null && Number.isFinite(result.tps))
+        ? result.tps
+        : (usage && usage.completion_tokens != null && result.elapsedMs > 0
+          ? usage.completion_tokens / (result.elapsedMs / 1000)
+          : null);
+      if (usage && usage.prompt_tokens != null) state.lastPromptTokens = usage.prompt_tokens;
+      if (thinkingMode === 'off' && streamedReasoning) {
+        toast('Thinking mode is Off, but this model still emitted reasoning. The backend/template may not honor enable_thinking=false.', 'warn');
+      }
       const saved = await window.Bridge.chat.append(state.current.id, {
-        role: 'assistant', content: streamed || (result.stopped ? '(stopped)' : '(empty response)'),
-        reasoning: streamedReasoning || null, usage, tps, model: server.displayName, stopped: result.stopped
+        role: 'assistant',
+        content: streamed || (result.stopped ? '(stopped)' : '(empty response)'),
+        reasoning: streamedReasoning || null,
+        usage,
+        tps,
+        model: modelLabel,
+        engineId: server.engineId || null,
+        stopped: result.stopped
       });
       state.convMessages.push(saved);
       bubble.innerHTML = '';
@@ -383,13 +443,27 @@ const ChatView = (() => {
       live.replaceWith(rendered);
       updateStats(saved);
       box.scrollTop = box.scrollHeight;
+      await reloadConvs(true);
     } catch (e) {
       if (e.name === 'AbortError' || /aborted/i.test(e.message || '')) {
         bubble.textContent = streamed + '  (stopped)';
         if (streamed) {
-          const saved = await window.Bridge.chat.append(state.current.id, { role: 'assistant', content: streamed, model: server.displayName, stopped: true, usage: { prompt_tokens: state.lastPromptTokens, completion_tokens: Math.round(streamed.length / 4) } });
+          // Do not invent token counts on cancel — leave missing fields as null (shown as n/a).
+          const saved = await window.Bridge.chat.append(state.current.id, {
+            role: 'assistant',
+            content: streamed,
+            reasoning: streamedReasoning || null,
+            model: modelLabel,
+            engineId: server.engineId || null,
+            stopped: true,
+            usage: state.lastPromptTokens != null
+              ? { prompt_tokens: state.lastPromptTokens, completion_tokens: null }
+              : null
+          });
           state.convMessages.push(saved);
           live.replaceWith(renderMessage(saved));
+          updateStats(saved);
+          await reloadConvs(true);
         } else {
           live.remove();
         }
@@ -408,14 +482,22 @@ const ChatView = (() => {
 
   function updateStats(m) {
     const el = $('chat-stats');
-    const total = state.convMessages.reduce((a, x) => a + ((x.usage && x.usage.completion_tokens) || 0), 0);
+    const measuredOut = state.convMessages.reduce((a, x) => {
+      const n = x.usage && x.usage.completion_tokens;
+      return a + (n != null && Number.isFinite(n) ? n : 0);
+    }, 0);
+    const hasAnyOut = state.convMessages.some(x => x.usage && x.usage.completion_tokens != null);
     const ctx = currentContextMax();
-    const used = m.usage ? m.usage.prompt_tokens + (m.usage.completion_tokens || 0) : null;
+    const used = m.usage && m.usage.prompt_tokens != null
+      ? m.usage.prompt_tokens + (m.usage.completion_tokens || 0)
+      : null;
     el.innerHTML = [
-      total ? `session ${total} tok` : null,
-      m.usage ? `last: ${m.usage.prompt_tokens}↑ ${m.usage.completion_tokens}↓` : null,
-      m.tps ? BMUtil.formatTps(m.tps) : null,
-      ctx && used ? `context ${Math.min(100, Math.round(100 * used / ctx))}% of ${ctx.toLocaleString()}` : null
+      hasAnyOut ? `session ${measuredOut} tok` : null,
+      m.usage
+        ? `last: ${fmtTok(m.usage.prompt_tokens)}↑ ${fmtTok(m.usage.completion_tokens)}↓`
+        : null,
+      (m.tps != null && Number.isFinite(m.tps)) ? BMUtil.formatTps(m.tps) : null,
+      ctx && used != null ? `context ${Math.min(100, Math.round(100 * used / ctx))}% of ${ctx.toLocaleString()}` : null
     ].filter(Boolean).join('  ·  ');
   }
 

@@ -27,6 +27,9 @@ class StreamClient {
     let stopped = false;
     let serverDone = false;
 
+    const thinking = opts.thinking
+      || (opts.params && opts.params.thinkingMode)
+      || 'auto';
     const body = {
       model: opts.model || 'default',
       messages: opts.messages || [],
@@ -39,10 +42,15 @@ class StreamClient {
     // the engine default untouched.
     // llama.cpp streams include usage only when explicitly requested.
     if (opts.engineFamily === 'llama.cpp') body.stream_options = { include_usage: true };
-    if (opts.thinking === 'on') body.think = true;
-    else if (opts.thinking === 'off') {
+    if (thinking === 'on') {
+      body.think = true;
+      body.chat_template_kwargs = { enable_thinking: true };
+    } else if (thinking === 'off') {
       body.think = false;
       body.chat_template_kwargs = { enable_thinking: false };
+      // llama.cpp: zero reasoning budget forces end-thinking for templates
+      // that still open a think block when kwargs are ignored.
+      body.reasoning_budget = 0;
     }
 
     const res = await fetchImpl(`${opts.baseUrl}/v1/chat/completions`, {
@@ -80,7 +88,7 @@ class StreamClient {
           if (payload === '[DONE]') { serverDone = true; continue; }
           let j;
           try { j = JSON.parse(payload); } catch (_) { continue; }
-          if (j.usage) usage = j.usage;
+          if (j.usage) usage = normalizeUsage(j.usage);
           if (j.error) throw new Error(j.error.message || 'engine error');
           const choice = (j.choices && j.choices[0]) || {};
           const delta = choice.delta || {};
@@ -88,6 +96,7 @@ class StreamClient {
           const rChunk = delta.reasoning_content !== undefined ? delta.reasoning_content
             : (delta.reasoning !== undefined ? delta.reasoning : null);
           if (rChunk) {
+            if (firstTokenAt === null) firstTokenAt = Date.now();
             reasoning += rChunk;
             if (opts.onReasoning) opts.onReasoning(rChunk);
           }
@@ -100,14 +109,23 @@ class StreamClient {
                 if (close >= 0) {
                   inThink = false; sawThinkClose = true;
                   const seg = text.slice(0, close);
-                  if (seg) { reasoning += seg; if (opts.onReasoning) opts.onReasoning(seg); }
+                  if (seg) {
+                    if (firstTokenAt === null) firstTokenAt = Date.now();
+                    reasoning += seg; if (opts.onReasoning) opts.onReasoning(seg);
+                  }
                   text = text.slice(close + 8);
                 }
-                else { reasoning += text; if (opts.onReasoning) opts.onReasoning(text); text = ''; }
+                else {
+                  if (firstTokenAt === null) firstTokenAt = Date.now();
+                  reasoning += text; if (opts.onReasoning) opts.onReasoning(text); text = '';
+                }
               } else {
                 const open = text.indexOf('<think>');
                 if (open >= 0) {
-                  if (open > 0) { content += text.slice(0, open); if (opts.onDelta) opts.onDelta(text.slice(0, open)); }
+                  if (open > 0) {
+                    if (firstTokenAt === null) firstTokenAt = Date.now();
+                    content += text.slice(0, open); if (opts.onDelta) opts.onDelta(text.slice(0, open));
+                  }
                   inThink = true;
                   text = text.slice(open + 7);
                 } else {
@@ -127,16 +145,28 @@ class StreamClient {
       else throw e;
     }
     const elapsedMs = Date.now() - started;
-    const tokens = usage && usage.completion_tokens ? usage.completion_tokens : null;
+    usage = normalizeUsage(usage);
+    // Prefer measured completion_tokens. Do not invent counts from character length.
+    // When reasoning_tokens is reported separately and completion excludes it,
+    // use the larger of completion vs (completion + reasoning) only if both present
+    // and completion already includes reasoning (typical llama.cpp): use completion once.
+    const genTokens = usage && Number.isFinite(usage.completion_tokens)
+      ? usage.completion_tokens
+      : null;
+    // Prefer generation window (first token → end); fall back to full elapsed.
+    // Clamp to at least 1ms so instantaneous mock streams still yield a finite tps.
+    const rawGenMs = firstTokenAt ? (Date.now() - firstTokenAt) : elapsedMs;
+    const genElapsedMs = Math.max(rawGenMs > 0 ? rawGenMs : elapsedMs, 1);
     return {
       content,
       reasoning: reasoning || null,
       usage,
       firstTokenMs: firstTokenAt ? firstTokenAt - started : null,
       elapsedMs,
-      tps: tokens && elapsedMs > 0 ? tokens / (elapsedMs / 1000) : null,
+      tps: genTokens != null ? genTokens / (genElapsedMs / 1000) : null,
       stopped,
-      serverDone
+      serverDone,
+      thinkingMode: thinking
     };
   }
 
@@ -165,4 +195,25 @@ function buildSampling(p) {
   return out;
 }
 
-if (typeof module !== 'undefined' && module.exports) module.exports = { StreamClient };
+/** Coerce usage fields; never invent zeros for missing measurements. */
+function normalizeUsage(u) {
+  if (!u || typeof u !== 'object') return null;
+  const num = (v) => (v == null || v === '' || Number.isNaN(Number(v)) ? null : Number(v));
+  const prompt = num(u.prompt_tokens);
+  const completion = num(u.completion_tokens);
+  const reasoning = num(u.reasoning_tokens != null ? u.reasoning_tokens : u.reasoning_completion_tokens);
+  const total = num(u.total_tokens);
+  const out = {
+    prompt_tokens: prompt,
+    completion_tokens: completion,
+    reasoning_tokens: reasoning,
+    total_tokens: total
+  };
+  // Drop the object entirely if every field is unavailable.
+  if (prompt == null && completion == null && reasoning == null && total == null) return null;
+  return out;
+}
+
+if (typeof module !== 'undefined' && module.exports) {
+  module.exports = { StreamClient, normalizeUsage, buildSampling };
+}

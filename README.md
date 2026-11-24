@@ -2,7 +2,7 @@
 
 **Your Machine. Your Models. Your Intelligence.**
 
-Black Mirror **v1.2.1** is a local LLM chat application, model library, inference engine manager, server controller, compatibility laboratory and benchmarking app for Windows. It gives your existing GGUF models a fast, dark, focused interface — and keeps every inference engine independently replaceable, so the app evolves with the engine ecosystem instead of being welded to one of them.
+Black Mirror **v1.2.2** is a local LLM chat application, model library, inference engine manager, server controller, compatibility laboratory and benchmarking app for Windows. It gives your existing GGUF models a fast, dark, focused interface — and keeps every inference engine independently replaceable, so the app evolves with the engine ecosystem instead of being welded to one of them.
 
 Everything runs locally: no cloud services, no accounts, no subscriptions. Chat traffic never leaves your machine unless *you* deliberately expose it to your LAN.
 
@@ -40,7 +40,7 @@ Rendered from the production UI (Electron renderer) in headless Chromium via the
 
 Packaged Windows builds ship on **GitHub Releases** (large binaries are not committed to the source tree):
 
-- **Portable zip:** `Black Mirror-1.2.1-win.zip` — extract anywhere and run `Black Mirror.exe`.
+- **Portable zip:** `Black Mirror-1.2.2-win.zip` — extract anywhere and run `Black Mirror.exe`.
 - Optional desktop shortcut; application state lives under `%APPDATA%\BlackMirror\`.
 - Inference engines install into that data directory only — never into your model folders.
 

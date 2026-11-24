@@ -17,6 +17,9 @@ const cache = new Map();
 /** Flags llama.cpp may or may not support depending on build/version. */
 const LLAMA_HELP_FLAGS = [
   { flag: '--reasoning-format', id: 'thinking', affects: 'server' },
+  { flag: '--reasoning', alt: '-rea', id: 'reasoningSwitch', affects: 'server' },
+  { flag: '--reasoning-budget', id: 'reasoningBudget', affects: 'server' },
+  { flag: '--chat-template-kwargs', id: 'chatTemplateKwargs', affects: 'server' },
   { flag: '--n-cpu-moe', id: 'cpuMoeLayers', affects: 'server' },
   { flag: '--cache-type-v', id: 'kvCacheV', affects: 'server' },
   { flag: '--cache-type-k', id: 'kvCacheK', affects: 'server' },
@@ -96,8 +99,12 @@ function summarize(descriptor, caps) {
   }
   return {
     probed: true,
-    thinking: caps.helpFlags.thinking ? 'reasoning-format' : 'unknown',
+    thinking: (caps.helpFlags.thinking || caps.helpFlags.reasoningSwitch || caps.helpFlags.reasoningBudget)
+      ? (caps.helpFlags.reasoningSwitch ? 'reasoning-switch' : 'reasoning-format')
+      : 'unknown',
     chatTemplate: caps.helpFlags.jinja ? 'jinja' : 'builtin',
+    reasoningBudget: !!caps.helpFlags.reasoningBudget,
+    reasoningSwitch: !!caps.helpFlags.reasoningSwitch,
     images: caps.helpFlags.mmproj ? 'mmproj-supported' : false,
     kvCacheTypes: caps.helpFlags.kvCacheV ? ['f16', 'q8_0', 'q4_0'] : (caps.helpFlags.kvCacheK ? ['f16', 'q8_0'] : ['f16']),
     flashAttention: !!caps.helpFlags.flashAttention,

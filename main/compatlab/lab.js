@@ -32,7 +32,7 @@ class CompatibilityLab {
     this.store = new JsonStore(`${this.dataDir}/compat-results.json`, { results: [] });
     this.store.load();
     this.onEvent = opts.onEvent || (() => {});
-    this.appVersion = opts.appVersion || '1.2.1';
+    this.appVersion = opts.appVersion || '1.2.2';
     this.fetchImpl = opts.fetchImpl || ((...a) => fetch(...a));
     this._running = null; // only one lab run at a time
   }

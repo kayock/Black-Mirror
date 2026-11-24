@@ -124,11 +124,25 @@ class LlamaCppAdapter {
       const fa = this._flag('flashAttention', '--flash-attn');
       if (fa) args.push(...fa);
     }
-    // Thinking mode: 'on' enables structured reasoning output; 'off'/'auto'
-    // are handled per-request (chat_template_kwargs), not server-side.
+    // Thinking mode (llama.cpp b12359+):
+    //   on   → structured reasoning extraction + reasoning switch on
+    //   off  → --reasoning off and --reasoning-budget 0 (forces end-of-think)
+    //   auto → leave server defaults; per-request kwargs still apply
     if (p.thinkingMode === 'on') {
       const rf = this._flag('thinking', '--reasoning-format', 'deepseek');
       if (rf) args.push(...rf);
+      const rs = this._flag('reasoningSwitch', '--reasoning', 'on');
+      if (rs) args.push(...rs);
+    } else if (p.thinkingMode === 'off') {
+      const rs = this._flag('reasoningSwitch', '--reasoning', 'off');
+      if (rs) args.push(...rs);
+      const rb = this._flag('reasoningBudget', '--reasoning-budget', 0);
+      if (rb) args.push(...rb);
+      // Always keep jinja so chat_template_kwargs / budget interact with templates.
+      if (!args.includes('--jinja')) {
+        const jinjaOff = this._flag('jinja', '--jinja');
+        if (jinjaOff) args.push(...jinjaOff);
+      }
     }
     if (p.cpuMoeLayers) {
       const moe = this._flag('cpuMoeLayers', '--n-cpu-moe', p.cpuMoeLayers);
@@ -159,7 +173,14 @@ class LlamaCppAdapter {
     if (p.maxTokens !== undefined) out.max_tokens = p.maxTokens;
     if (p.thinkingMode === 'off') {
       // Explicit disable — never merely omit the parameter.
+      // chat_template_kwargs covers Qwen3/Qwen3.5 jinja templates;
+      // reasoning_budget 0 covers models that open a think tag by default.
       out.chat_template_kwargs = { enable_thinking: false };
+      out.reasoning_budget = 0;
+      out.think = false;
+    } else if (p.thinkingMode === 'on') {
+      out.chat_template_kwargs = { enable_thinking: true };
+      out.think = true;
     }
     return out;
   }

@@ -2,6 +2,21 @@
 
 All notable changes to Black Mirror are documented here. Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versioning is semver.
 
+## [1.2.2] — 2026-11-24
+
+Focused corrective release for thinking control, server/conversation model identity, and chat telemetry. Preserves v1.2.1 architecture, installed engines and user data.
+
+### Fixed
+- **Thinking mode Off did not disable reasoning**: chat never received `server.params` because `ServerController._public()` omitted `params`, so the client always treated thinking as `auto`. Off now applies server flags (`--reasoning off`, `--reasoning-budget 0` when supported) and request body controls (`chat_template_kwargs.enable_thinking=false`, `think:false`, `reasoning_budget:0`). On/Auto map correctly. If a model still emits reasoning while Off, the UI shows an honest compatibility warning instead of silently hiding it.
+- **Chat server badge showed `undefined :port`**: `_public()` omitted `displayName`; badge and model select now use a safe label with basename fallback and never render JavaScript `undefined`.
+- **Conversation sidebar showed `no model`**: new chats and assistant messages now persist the active model/engine; append backfills conversation metadata; list resolves model from recent messages when the top-level field is missing, without inventing identities.
+- **Token stats showed `null` / fabricated zeros**: streaming usage is normalized without inventing counts; cancelled generations no longer estimate tokens from character length; unavailable values display as `n/a`; session totals only sum measured completion tokens.
+
+### Changed
+- Capability probe recognizes `--reasoning` / `--reasoning-budget` / `--chat-template-kwargs` on llama.cpp b12359+.
+- Regression suite adds dedicated v1.2.2 coverage for thinking payloads, identity, conversation persistence and usage telemetry.
+- Version indicators and portable package aligned to **v1.2.2**.
+
 ## [1.2.1] — 2026-11-24
 
 Windows hardware verification patch. Preserves the v1.2.0 baseline; ships one confirmed reliability fix discovered during source review and Windows install preparation.

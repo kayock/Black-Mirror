@@ -56,9 +56,6 @@ class ServerController {
     this._nextRemoteId = 1;
     // Persisted endpoint registry (connect-only, never owned).
     try {
-      const { JsonStore } = require('../core/store');
-const net = require('net');
-const ownership = require('./ownership');
       this._remoteStore = new JsonStore(path.join(opts.dataDir || '.', 'remotes.json'), { nextId: 1, remotes: [] });
       this._remoteStore.load();
       this._nextRemoteId = this._remoteStore.data.nextId || 1;
@@ -202,8 +199,14 @@ const ownership = require('./ownership');
   }
 
   _public(p) {
+    const modelPath = p.model || null;
+    const displayName = p.displayName
+      || (modelPath ? require('path').basename(String(modelPath)).replace(/\.gguf$/i, '') : null)
+      || null;
     return {
-      id: p.id, pid: p.pid, engineId: p.engineId, model: p.model,
+      id: p.id, pid: p.pid, engineId: p.engineId, model: modelPath,
+      displayName,
+      params: p.params || {},
       port: p.port, bind: p.bind, startedAt: p.startedAt,
       status: p.status, mode: 'managed',
       family: p.family || null,

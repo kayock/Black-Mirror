@@ -130,8 +130,13 @@ async function streamOnce(baseUrl, prompt, maxTokens, onDelta, abortAfterMs) {
   const adapter = new LlamaCppAdapter({ id: 'x', family: 'llama.cpp' }, {});
   const off = adapter.buildRequestOverrides({ thinkingMode: 'off' });
   const on = adapter.buildRequestOverrides({ thinkingMode: 'on' });
-  log('thinking request shapes', off.chat_template_kwargs?.enable_thinking === false && on.chat_template_kwargs === undefined,
-    `off → ${JSON.stringify(off.chat_template_kwargs)}`);
+  log('thinking request shapes',
+    off.chat_template_kwargs?.enable_thinking === false
+      && off.reasoning_budget === 0
+      && off.think === false
+      && on.chat_template_kwargs?.enable_thinking === true
+      && on.think === true,
+    `off → ${JSON.stringify({ kwargs: off.chat_template_kwargs, budget: off.reasoning_budget, think: off.think })}; on → ${JSON.stringify({ kwargs: on.chat_template_kwargs, think: on.think })}`);
 
   // ---- 5. ownership records persisted for restart recovery ----
   const storeFile = `${dir}/managed-processes.json`;
