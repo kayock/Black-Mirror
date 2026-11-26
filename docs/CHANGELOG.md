@@ -2,6 +2,17 @@
 
 All notable changes to Black Mirror are documented here. Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versioning is semver.
 
+## [1.2.3] — 2026-11-26
+
+Chat reliability maintenance release.
+
+- Fix fenced-code Markdown DOM hierarchy exception; fall back to literal text on rendering errors.
+- Checkpoint streamed assistant text and reasoning, finalize the same message, preserve partial output on interruption, and account for measured token usage.
+- Cancel abandoned inference streams and guard active conversation operations.
+- Normalize model display names across path separators; keep preview checkpoint operations compatible.
+- Add regression tests and automated Windows packaging validation.
+- Validation of the preceding repair commit: 139 passed, 0 failed, 3 skipped; Windows ZIP built successfully. Final versioned build and interactive Windows smoke test are separate gates.
+
 ## [1.2.2] — 2026-11-24
 
 Focused corrective release for thinking control, server/conversation model identity, and chat telemetry. Preserves v1.2.1 architecture, installed engines and user data.
