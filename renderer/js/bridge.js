@@ -154,7 +154,15 @@ class MockBridge {
       this._persistConvs();
       return Promise.resolve(m);
     },
-    updateMessage: () => Promise.resolve(true),
+    updateMessage: (id, msgId, patch) => {
+      const c = this._convs.find(x => x.id === id);
+      const m = c && c.messages.find(x => x.id === msgId);
+      if (!m) return Promise.reject(new Error('no message'));
+      Object.assign(m, patch);
+      c.updatedAt = Date.now();
+      this._persistConvs();
+      return Promise.resolve({ ...m });
+    },
     truncateFrom: () => Promise.resolve(true),
     setMeta: (id, patch) => {
       const c = this._convs.find(x => x.id === id);
