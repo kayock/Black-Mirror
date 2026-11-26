@@ -26,6 +26,7 @@ const ChatView = (() => {
   }
 
   async function openConv(id) {
+    if (state.streaming) return;
     state.current = await window.Bridge.chat.get(id);
     state.convMessages = state.current.messages || [];
     renderMessages();
@@ -33,6 +34,7 @@ const ChatView = (() => {
   }
 
   async function newConv({ silent } = {}) {
+    if (state.streaming) return;
     const server = state.servers.find(s => s.status === 'running');
     const label = serverModelLabel(server);
     state.current = await window.Bridge.chat.create({
@@ -78,6 +80,7 @@ const ChatView = (() => {
           BMUtil.el('span', {}, [
             BMUtil.el('button', { class: 'conv-del', text: '✕', title: 'Delete conversation', onclick: async (e) => {
               e.stopPropagation();
+              if (state.streaming) return;
               if (!(await uiConfirm('Delete conversation', 'Delete this conversation? Its messages will be removed from disk. This cannot be undone.'))) return;
               await window.Bridge.chat.remove(c.id);
               await reloadConvs();
@@ -180,6 +183,7 @@ const ChatView = (() => {
   }
 
   function editMessage(m) {
+    if (state.streaming) return;
     const box = $('chat-messages');
     const idx = state.convMessages.findIndex(x => x.id === m.id);
     const orig = state.convMessages[idx];
@@ -187,6 +191,7 @@ const ChatView = (() => {
       BMUtil.el('textarea', { text: orig.content }),
       BMUtil.el('div', { style: 'display:flex;gap:8px;margin-top:6px' }, [
         BMUtil.el('button', { class: 'btn btn-primary btn-sm', text: 'Resend', onclick: async () => {
+          if (state.streaming) return;
           const newContent = editor.querySelector('textarea').value;
           // truncate history at this message (inclusive), then resend
           await window.Bridge.chat.truncateFrom(state.current.id, m.id, { inclusive: true });
@@ -203,6 +208,7 @@ const ChatView = (() => {
   }
 
   async function regenerate(m) {
+    if (state.streaming) return;
     const idx = state.convMessages.findIndex(x => x.id === m.id);
     const prevUser = [...state.convMessages.slice(0, idx)].reverse().find(x => x.role === 'user');
     if (!prevUser) return;
@@ -340,7 +346,8 @@ const ChatView = (() => {
 
   async function generate(prewrittenText, prewrittenAttachments) {
     const server = activeServer();
-    if (!server) return;
+    if (!server || state.streaming) return;
+    state.streaming = true;
     const modelLabel = serverModelLabel(server);
     const messages = buildApiMessages();
     // ensure last message is the user turn we just added
@@ -486,7 +493,7 @@ const ChatView = (() => {
       }
       if (!stopped) toast(e.message, 'err');
       else if (!streamed && !streamedReasoning) live.remove();
-        } finally {
+    } finally {
       await pending;
       if (checkpointError && !savedFinal) toast('Response checkpoint failed: ' + checkpointError.message, 'err');
       state.streaming = false;
