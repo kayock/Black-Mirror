@@ -2,6 +2,18 @@
 /* Markdown rendering with syntax highlighting + copy buttons. */
 const BMMarkdown = {
   render(text) {
+    try { return this.renderFormatted(text); }
+    catch (error) {
+      console.warn('Markdown rendering failed; displaying plain text', error);
+      const fragment = document.createDocumentFragment();
+      const fallback = document.createElement('div');
+      fallback.style.whiteSpace = 'pre-wrap';
+      fallback.textContent = text || '';
+      fragment.appendChild(fallback);
+      return fragment;
+    }
+  },
+  renderFormatted(text) {
     const raw = marked.parse(text || '', { breaks: true, gfm: true });
     const tpl = document.createElement('template');
     tpl.innerHTML = raw;
@@ -33,9 +45,9 @@ const BMMarkdown = {
         tag.style.cssText = 'position:absolute;top:8px;left:12px;';
         wrap.appendChild(tag);
       }
+      pre.replaceWith(wrap);
       wrap.appendChild(pre);
       wrap.appendChild(btn);
-      pre.replaceWith(wrap);
     });
     // sanitize: drop script/iframe/event handlers
     tpl.content.querySelectorAll('script,iframe,object,embed,link,style').forEach(n => n.remove());
