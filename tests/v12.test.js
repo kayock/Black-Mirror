@@ -64,7 +64,9 @@ describe('Build manifest reproducibility', () => {
     // this test documents the distinction the audit demanded.
     const prod = { name: pkg.name, version: pkg.version, main: pkg.main, dependencies: pkg.dependencies };
     assert.ok(!('scripts' in prod) && !('devDependencies' in prod), 'production manifest must not carry dev tooling');
-    assert.equal(prod.version, '1.2.2');
+    const lock = JSON.parse(fs.readFileSync(path.join(ROOT, 'package-lock.json'), 'utf8'));
+    assert.equal(prod.version, lock.version);
+    assert.equal(prod.version, lock.packages[''].version);
   });
 });
 
