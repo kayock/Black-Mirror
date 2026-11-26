@@ -137,7 +137,16 @@ class Conversations {
     if (!conv) throw new Error(`Conversation ${id} not found`);
     const i = conv.messages.findIndex(m => m.id === msgId);
     if (i < 0) throw new Error(`Message ${msgId} not found`);
-    Object.assign(conv.messages[i], patch);
+    const previous = conv.messages[i];
+    // Checkpoint finalization updates usage on an existing message; account for the delta once.
+    if (Object.prototype.hasOwnProperty.call(patch, 'usage')) {
+      for (const [field, stat] of [['prompt_tokens', 'promptTokens'], ['completion_tokens', 'completionTokens']]) {
+        const before = previous.usage && previous.usage[field];
+        const after = patch.usage && patch.usage[field];
+        conv.stats[stat] = (conv.stats[stat] || 0) - (before || 0) + (after || 0);
+      }
+    }
+    Object.assign(previous, patch);
     this._save(conv);
     return conv.messages[i];
   }

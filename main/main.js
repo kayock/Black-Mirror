@@ -77,7 +77,7 @@ function initCore() {
   benchStore.load();
   lab = new CompatibilityLab(controller, registry, logger, {
     dataDir: dd,
-    appVersion: app.getVersion ? app.getVersion() : '1.2.2',
+    appVersion: app.getVersion ? app.getVersion() : require('../package.json').version,
     onEvent: e => send('lab-progress', e)
   });
   diagnostics = new Diagnostics({ appVersion: lab.appVersion, logger, registry, installer, library, controller, lab, monitor });

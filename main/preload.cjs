@@ -126,7 +126,7 @@ contextBridge.exposeInMainWorld('blackMirror', {
 
   platform: process.platform,
   versions: {
-    app: '1.2.1',
+    app: '1.2.3',
     electron: process.versions.electron || null,
     node: process.versions.node || null
   }

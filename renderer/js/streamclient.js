@@ -143,6 +143,12 @@ class StreamClient {
       if (opts.signal && opts.signal.aborted) stopped = true;
       else if (e && (e.name === 'AbortError')) stopped = true;
       else throw e;
+    } finally {
+      // A callback or transport error must not leave a live HTTP stream behind.
+      if (!serverDone) {
+        try { await reader.cancel(); } catch (_) { /* already closed/aborted */ }
+      }
+      try { reader.releaseLock(); } catch (_) { /* already released */ }
     }
     const elapsedMs = Date.now() - started;
     usage = normalizeUsage(usage);

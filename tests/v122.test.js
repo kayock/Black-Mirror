@@ -310,11 +310,13 @@ describe('v1.2.2 conversation model persistence', () => {
   });
 });
 
-describe('v1.2.2 package version markers', () => {
-  test('package.json and UI brand are v1.2.2', () => {
+describe('Release package version markers', () => {
+  test('package.json, preload and UI brand agree', () => {
     const pkg = JSON.parse(fs.readFileSync(path.join(__dirname, '..', 'package.json'), 'utf8'));
-    assert.equal(pkg.version, '1.2.2');
+    assert.match(pkg.version, /^\d+\.\d+\.\d+$/);
     const html = fs.readFileSync(path.join(__dirname, '..', 'renderer', 'index.html'), 'utf8');
-    assert.match(html, /v1\.2\.2/);
+    assert.ok(html.includes('class="brand-version mono">v' + pkg.version + '</div>'));
+    const preload = fs.readFileSync(path.join(__dirname, '..', 'main', 'preload.cjs'), 'utf8');
+    assert.ok(preload.includes("app: '" + pkg.version + "'"));
   });
 });

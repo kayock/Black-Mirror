@@ -97,7 +97,7 @@ class ServerController {
         adopted.push({ ...rec, recoveredStatus: 'running' });
         const p = {
           id: rec.id, pid: rec.pid, engineId: rec.engineId, model: rec.model,
-          family: null, displayName: rec.model ? path.basename(String(rec.model)) : rec.engineId,
+          family: null, displayName: rec.model ? path.win32.basename(String(rec.model)) : rec.engineId,
           port: rec.port, bind: rec.bind, params: {}, startedAt: rec.startedAt,
           pidRecovered: true, exePath: rec.exePath, startTime: rec.startTime,
           proc: null, logs: [], status: 'running', logFile: null,
@@ -201,7 +201,7 @@ class ServerController {
   _public(p) {
     const modelPath = p.model || null;
     const displayName = p.displayName
-      || (modelPath ? require('path').basename(String(modelPath)).replace(/\.gguf$/i, '') : null)
+      || (modelPath ? path.win32.basename(String(modelPath)).replace(/\.gguf$/i, '') : null)
       || null;
     return {
       id: p.id, pid: p.pid, engineId: p.engineId, model: modelPath,
@@ -278,7 +278,7 @@ class ServerController {
     const p = {
       id, engineId: opts.engineId, model,
       family: d.family,
-      displayName: opts.modelDisplayName || opts.modelName || path.basename(String(model)),
+      displayName: opts.modelDisplayName || opts.modelName || path.win32.basename(String(model)),
       port: opts.port, bind: opts.bind || '127.0.0.1',
       params: opts.params || {}, startedAt: null, pid: null,
       proc: null, logs: [], status: 'starting', logFile,
