@@ -369,9 +369,32 @@ const ChatView = (() => {
     state.abort = new AbortController();
     const t0 = Date.now();
     let streamed = '', streamedReasoning = '';
+    const conversationId = state.current.id;
+    let draft = null, savedFinal = false, lastCheckpoint = 0;
+    let pending = Promise.resolve();
+    let checkpointError = null;
+    const checkpoint = () => {
+      if (Date.now() - lastCheckpoint < 2000) return;
+      lastCheckpoint = Date.now();
+      const patch = { content: streamed, reasoning: streamedReasoning || null, stopped: true };
+      pending = pending.then(async () => {
+        if (!draft) draft = await window.Bridge.chat.append(conversationId, { role: 'assistant', model: modelLabel, engineId: server.engineId || null, ...patch });
+        else await window.Bridge.chat.updateMessage(conversationId, draft.id, patch);
+      }).catch(error => { checkpointError = error; });
+    };
+    const persist = async (patch) => {
+      await pending;
+      const saved = draft
+        ? await window.Bridge.chat.updateMessage(conversationId, draft.id, patch)
+        : await window.Bridge.chat.append(conversationId, { role: 'assistant', model: modelLabel, engineId: server.engineId || null, ...patch });
+      savedFinal = true;
+      if (state.current && state.current.id === conversationId) state.convMessages.push(saved);
+      return saved;
+    };
 
     const onDelta = (d) => {
       streamed += d;
+      checkpoint();
       bubble.innerHTML = '';
       bubble.appendChild(BMMarkdown.render(streamed));
       bubble.appendChild(BMUtil.el('span', { class: 'stream-cursor' }));
@@ -379,6 +402,7 @@ const ChatView = (() => {
     };
     const onReasoning = (d) => {
       streamedReasoning += d;
+      checkpoint();
       if (!showThinking) return;
       const tp = $('chat-thinking');
       tp.classList.remove('hidden');
@@ -427,8 +451,7 @@ const ChatView = (() => {
       if (thinkingMode === 'off' && streamedReasoning) {
         toast('Thinking mode is Off, but this model still emitted reasoning. The backend/template may not honor enable_thinking=false.', 'warn');
       }
-      const saved = await window.Bridge.chat.append(state.current.id, {
-        role: 'assistant',
+      const saved = await persist({
         content: streamed || (result.stopped ? '(stopped)' : '(empty response)'),
         reasoning: streamedReasoning || null,
         usage,
@@ -437,7 +460,6 @@ const ChatView = (() => {
         engineId: server.engineId || null,
         stopped: result.stopped
       });
-      state.convMessages.push(saved);
       bubble.innerHTML = '';
       const rendered = renderMessage(saved);
       live.replaceWith(rendered);
@@ -445,33 +467,28 @@ const ChatView = (() => {
       box.scrollTop = box.scrollHeight;
       await reloadConvs(true);
     } catch (e) {
-      if (e.name === 'AbortError' || /aborted/i.test(e.message || '')) {
-        bubble.textContent = streamed + '  (stopped)';
-        if (streamed) {
-          // Do not invent token counts on cancel — leave missing fields as null (shown as n/a).
-          const saved = await window.Bridge.chat.append(state.current.id, {
-            role: 'assistant',
+      const stopped = e.name === 'AbortError' || /aborted/i.test(e.message || '');
+      if (state.abort) state.abort.abort();
+      // Preserve raw text even when the renderer or transport fails.
+      bubble.textContent = streamed || streamedReasoning || '';
+      if (!savedFinal && (streamed || streamedReasoning)) {
+        try {
+          const saved = await persist({
             content: streamed,
             reasoning: streamedReasoning || null,
-            model: modelLabel,
-            engineId: server.engineId || null,
-            stopped: true,
-            usage: state.lastPromptTokens != null
-              ? { prompt_tokens: state.lastPromptTokens, completion_tokens: null }
-              : null
+            stopped: true
           });
-          state.convMessages.push(saved);
-          live.replaceWith(renderMessage(saved));
           updateStats(saved);
           await reloadConvs(true);
-        } else {
-          live.remove();
+        } catch (saveError) {
+          toast('Response could not be saved; copy the visible text: ' + saveError.message, 'err');
         }
-      } else {
-        bubble.innerHTML = `<span style="color:var(--err)">✕ ${BMUtil.esc(e.message)}</span>`;
-        toast(e.message, 'err');
       }
-    } finally {
+      if (!stopped) toast(e.message, 'err');
+      else if (!streamed && !streamedReasoning) live.remove();
+        } finally {
+      await pending;
+      if (checkpointError && !savedFinal) toast('Response checkpoint failed: ' + checkpointError.message, 'err');
       state.streaming = false;
       state.abort = null;
       $('btn-send').classList.remove('hidden');
