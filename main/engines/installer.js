@@ -294,8 +294,8 @@ class EngineInstaller {
 
   /**
    * Validate a staged engine tree BEFORE activation: the expected server
-   * binary must exist and be executable-looking. Catches wrong-arch assets,
-   * incomplete downloads and failed extractions before anything is replaced.
+   * binary must exist and be nonempty; Windows PE headers must identify x64.
+   * Header validation alone does not prove runtime compatibility.
    */
   _validateStaged(descriptor, stagingDir) {
     const serverBinary = descriptor.serverBinary;
@@ -307,6 +307,17 @@ class EngineInstaller {
       throw new EngineError(
         `Staged ${descriptor.id} archive does not contain the expected ${serverBinary}${isWindows() ? '.exe' : ''} binary — wrong asset, wrong architecture, or corrupted archive. Nothing was installed; your previous version is untouched.`,
         'invalid-archive');
+    }
+    if (isWindows()) {
+      const fd = fs.openSync(found, 'r');
+      try {
+        const dos = Buffer.alloc(64);
+        if (fs.readSync(fd, dos, 0, 64, 0) !== 64 || dos.readUInt16LE(0) !== 0x5a4d) throw new EngineError('Invalid Windows executable header', 'invalid-archive');
+        const offset = dos.readUInt32LE(60);
+        const pe = Buffer.alloc(26);
+        if (offset < 64 || offset + pe.length > fs.fstatSync(fd).size || fs.readSync(fd, pe, 0, pe.length, offset) !== pe.length || pe.readUInt32LE(0) !== 0x4550) throw new EngineError('Invalid Windows PE header', 'invalid-archive');
+        if (pe.readUInt16LE(4) !== 0x8664 || pe.readUInt16LE(24) !== 0x20b) throw new EngineError('Expected an x64 Windows PE32+ executable', 'invalid-archive');
+      } finally { fs.closeSync(fd); }
     }
     return { ok: true, binary: found };
   }
