@@ -71,6 +71,7 @@ class ServerController {
           id: p.id, pid: p.pid, engineId: p.engineId, model: p.model,
           modelPath: p.modelPath || null, port: p.port, bind: p.bind,
           startedAt: p.startedAt, exePath: p.exePath || null,
+          params: p.params, displayName: p.displayName, family: p.family, readyUrl: p.readyUrl,
           startTime: p.startTime || null
         }));
       this._ownershipStore.save();
@@ -97,13 +98,15 @@ class ServerController {
         adopted.push({ ...rec, recoveredStatus: 'running' });
         const p = {
           id: rec.id, pid: rec.pid, engineId: rec.engineId, model: rec.model,
-          family: null, displayName: rec.model ? path.win32.basename(String(rec.model)) : rec.engineId,
-          port: rec.port, bind: rec.bind, params: {}, startedAt: rec.startedAt,
+          family: rec.family || null, displayName: rec.displayName || (rec.model ? path.win32.basename(String(rec.model)) : rec.engineId),
+          port: rec.port, bind: rec.bind, params: rec.params || null, startedAt: rec.startedAt,
           pidRecovered: true, exePath: rec.exePath, startTime: rec.startTime,
           proc: null, logs: [], status: 'running', logFile: null,
-          readyUrl: rec.port ? `http://127.0.0.1:${rec.port}/health` : null, adapter: 'openai'
+          readyUrl: rec.readyUrl || (rec.port ? `http://127.0.0.1:${rec.port}/health` : null), adapter: 'openai'
         };
         this.processes.set(rec.id, p);
+        const recoveredNumber = /^srv-(\d+)$/.exec(rec.id);
+        if (recoveredNumber) this._nextId = Math.max(this._nextId, Number(recoveredNumber[1]) + 1);
       } else {
         external.push({ ...rec, snapshot: { exe: snap.exe, cmdline: snap.cmdline.slice(0, 8) }, reason: verdict.reason });
       }
@@ -147,7 +150,7 @@ class ServerController {
   listRemotes() { return [...this.remotes.values()]; }
 
   addRemote({ label, baseUrl, model }) {
-    const url = String(baseUrl || '').trim().replace(/\/+$/, '');
+    const url = String(baseUrl || '').trim().replace(/\/+$/, '').replace(/\/v1$/i, '');
     if (!/^https?:\/\//i.test(url)) throw new EngineError('Endpoint URL must start with http:// or https://', 'bad-url');
     const id = 'remote-' + (this._nextRemoteId++);
     const rec = { id, label: label || url, baseUrl: url, model: model || null, addedAt: Date.now(), status: 'unknown', mode: 'remote' };
@@ -171,7 +174,7 @@ class ServerController {
     const rec = this.remotes.get(idOrUrl) || { baseUrl: idOrUrl, id: null, label: idOrUrl };
     const started = Date.now();
     try {
-      const res = await this.fetchImpl(`${rec.baseUrl}/v1/models`, { signal: AbortSignal.timeout(8000) });
+      const res = await this.fetchImpl(`${rec.baseUrl.replace(/\/+$/, '').replace(/\/v1$/i, '')}/v1/models`, { signal: AbortSignal.timeout(8000) });
       const ms = Date.now() - started;
       if (!res.ok) {
         if (rec.id) { rec.status = 'unreachable'; rec.lastError = `HTTP ${res.status}`; }
@@ -446,7 +449,7 @@ class ServerController {
     if (p.readyUrl) result.httpDown = !(await this._httpResponding(p.readyUrl));
     else result.httpDown = result.portReleased;
 
-    result.confirmed = result.exitObserved && !result.pidAliveAfter && result.portReleased;
+    result.confirmed = result.exitObserved && !result.pidAliveAfter && result.portReleased && result.httpDown;
     if (result.confirmed) {
       p.status = 'stopped';
       p.endedAt = Date.now();
@@ -470,6 +473,7 @@ class ServerController {
     const p = this._resolve(idOrKey);
     if (!p) throw new EngineError(`No managed server "${idOrKey}"`, 'not-found');
     if (p.mode === 'remote') throw new EngineError('Remote endpoints are never restarted by Black Mirror', 'not-owned');
+    if (p.pidRecovered && !p.params) throw new EngineError('Original launch parameters unavailable; stop and explicitly configure a new launch instead.', 'config-unavailable');
     const opts = {
       engineId: p.engineId,
       modelPath: p.model,
