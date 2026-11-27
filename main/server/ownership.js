@@ -24,7 +24,7 @@ function _procStartTime(pid) {
   if (!stat) return null;
   const close = stat.lastIndexOf(')');
   const fields = stat.slice(close + 2).split(' ');
-  return fields[20] || null; // field 22 overall → index 20 after comm
+  return fields[19] || null; // field 3 is index 0; field 22 is index 19
 }
 
 /** Snapshot a live process's identity. Returns null when it does not exist. */
