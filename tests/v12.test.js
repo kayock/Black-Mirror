@@ -267,7 +267,16 @@ describe('Engine install staging & update safety', () => {
     fs.mkdirSync(subdir, { recursive: true });
     // Host-platform binary name: installer requires .exe on Windows.
     const binName = process.platform === 'win32' ? 'llama-server.exe' : 'llama-server';
-    fs.writeFileSync(path.join(subdir, binName), process.platform === 'win32' ? 'MZ' : '#!/bin/sh\n');
+    const bin = path.join(subdir, binName);
+    if (process.platform === 'win32') {
+      fs.writeFileSync(bin, 'MZ');
+      assert.throws(() => installer._validateStaged(desc, dir), /Invalid Windows executable header/);
+      const pe = Buffer.alloc(128); pe.writeUInt16LE(0x5a4d, 0); pe.writeUInt32LE(64, 60); pe.writeUInt32LE(0x4550, 64); pe.writeUInt16LE(0x14c, 68); pe.writeUInt16LE(0x10b, 88);
+      fs.writeFileSync(bin, pe);
+      assert.throws(() => installer._validateStaged(desc, dir), /Expected an x64/);
+      pe.writeUInt16LE(0x8664, 68); pe.writeUInt16LE(0x20b, 88);
+      fs.writeFileSync(bin, pe);
+    } else fs.writeFileSync(bin, '#!/bin/sh\n');
     const ok = installer._validateStaged(desc, dir);
     assert.equal(ok.ok, true);
     fs.rmSync(dir, { recursive: true, force: true });
