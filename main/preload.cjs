@@ -46,7 +46,7 @@ contextBridge.exposeInMainWorld('blackMirror', {
     status: () => invoke('engines:status'),
     hardware: () => invoke('engines:hardware'),
     capabilities: (id) => invoke('engines:capabilities', id),
-    install: (id) => invoke('engines:install', id),
+    install: (id, tag) => invoke('engines:install', id, tag),
     uninstall: (id, tag) => invoke('engines:uninstall', id, tag),
     setActive: (id, tag) => invoke('engines:setActive', id, tag),
     setCustomPath: (id, p) => invoke('engines:setCustomPath', id, p),
