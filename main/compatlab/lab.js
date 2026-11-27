@@ -118,7 +118,7 @@ class CompatibilityLab {
       let exe;
       try {
         exe = this.registry.adapter(cfg.engineId).executablePath();
-        emit('exe-startup', 'pass', exe);
+        emit('exe-startup', 'pass', 'Executable located (actual startup checked in load stage): ' + exe);
       } catch (e) {
         emit('exe-startup', 'fail', e.message);
         return this._finish(cfg, stages, measured, outcome);
@@ -131,7 +131,7 @@ class CompatibilityLab {
         const text = (r.stdout || '') + (r.stderr || '');
         const devices = require('../engines/capabilities').parseDevices(text);
         measured.devices = devices;
-        emit('device-detect', 'pass', devices.length ? `${devices.length} device(s): ${devices.map(x => x.description).join('; ')}` : 'no discrete accelerator devices reported (CPU path)');
+        emit('device-detect', r.status === 0 && !r.error ? 'pass' : 'unverified', r.status !== 0 || r.error ? 'Device probe did not complete successfully' : devices.length ? `${devices.length} device(s): ${devices.map(x => x.description).join('; ')}` : 'no discrete accelerator devices reported (CPU path)');
       } else {
         emit('device-detect', 'pass', `${d.family} manages its own devices`);
       }
@@ -223,7 +223,7 @@ class CompatibilityLab {
           throw new Error('adapter does not construct an explicit thinking-off request (must never merely omit the parameter)');
         }
         measured.thinkingShapes = shapes;
-        emit('thinking', 'pass', `on → ${JSON.stringify(shapes.on)}, off → ${JSON.stringify(shapes.off)} (explicit disable verified)`);
+        emit('thinking', 'pass', `on → ${JSON.stringify(shapes.on)}, off → ${JSON.stringify(shapes.off)} (request shape only; model behavior not verified)`);
       } catch (e) {
         emit('thinking', 'fail', String(e.message).slice(0, 400));
         return this._finishWithServer(cfg, stages, measured, outcome, () => this.controller.stop(server.id));
