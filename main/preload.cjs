@@ -59,9 +59,9 @@ contextBridge.exposeInMainWorld('blackMirror', {
     external: () => invoke('servers:external'),
     start: (opts) => invoke('servers:start', opts),
     stop: (id) => invoke('servers:stop', id),
-    restart: (id) => invoke('servers:restart', id),
+    restart: (id, changes) => invoke('servers:restart', id, changes),
     logs: (id) => invoke('servers:logs', id),
-    engineModels: (engineId) => invoke('servers:engineModels', engineId),
+    engineModels: (engineId, network) => invoke('servers:engineModels', engineId, network),
     addRemote: (opts) => invoke('servers:addRemote', opts),
     removeRemote: (id) => invoke('servers:removeRemote', id),
     testRemote: (idOrUrl) => invoke('servers:testRemote', idOrUrl)
