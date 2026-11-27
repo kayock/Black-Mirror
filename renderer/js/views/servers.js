@@ -43,9 +43,9 @@ const ServersView = (() => {
       if (!url) { toast('Enter an endpoint URL first', 'warn'); return; }
       try {
         const r = await window.Bridge.servers.addRemote({ label: labelInput.value.trim(), baseUrl: url });
-        await window.Bridge.servers.testRemote(r.id);
+        const result = await window.Bridge.servers.testRemote(r.id);
         closeModal();
-        toast('Endpoint connected (read-only ownership)', 'ok');
+        toast(result.ok ? 'Endpoint connected (read-only ownership)' : `Endpoint saved but unreachable: ${result.error}`, result.ok ? 'ok' : 'err');
         reload();
       } catch (e) { toast(e.message, 'err'); }
     });
