@@ -331,6 +331,7 @@ class ServerController {
     p.modelPath = d.family === 'llama.cpp' ? model : null;
     p.exePath = exe;
     const identity = ownership.snapshotProcess(proc.pid);
+    p.exePath = identity?.exe || exe;
     p.startTime = identity?.startTime || null;
     p.cmdline = identity?.cmdline || null;
     this._saveOwnership();
@@ -533,9 +534,11 @@ class ServerController {
    */
   async releaseForExit() {
     for (const p of [...this.processes.values()]) {
-      if (p.persistent && ownership.verifyOwnership(p, ownership.snapshotProcess(p.pid)).owned) {
+      const verdict = p.persistent ? ownership.verifyOwnership(p, ownership.snapshotProcess(p.pid)) : null;
+      if (p.persistent && verdict.owned) {
         if (p.proc) p.proc.unref();
       } else {
+        if (verdict) this.logger.warn('controller', `Persistence refused for ${p.id}: ${verdict.reason}`);
         try { await this.stop(p.id); } catch (e) { this.logger.warn('controller', `Shutdown stop failed: ${e.message}`); }
       }
     }
