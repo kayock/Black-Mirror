@@ -118,35 +118,22 @@ class EngineInstaller {
     if (!res.ok) throw new EngineError(`Download failed (${res.status}) for ${url}`, 'network');
     const total = Number(res.headers.get('content-length') || 0);
     let received = 0;
-    const out = fs.createWriteStream(destFile);
-    const reader = res.body.getReader ? res.body.getReader() : null;
-    await new Promise((resolve, reject) => {
-      const pump = async () => {
-        try {
-          for (;;) {
-            const { done, value } = await reader.read();
-            if (done) break;
-            received += value.length;
-            if (received > this.maxZipBytes) throw new EngineError('Download exceeded size cap', 'size');
-            if (!out.write(Buffer.from(value))) {
-              await new Promise(r => out.once('drain', r));
-            }
-            this.onProgress({ url, received, total, ratio: total ? received / total : null });
-          }
-          out.end(resolve);
-        } catch (e) {
-          out.end();
-          reject(e);
-        }
-      };
-      if (reader) pump();
-      else {
-        // Node 18+ fetch gives a web stream; body is already a ReadableStream.
-        require('stream').Readable.fromWeb(res.body).pipe(out)
-          .on('error', reject)
-          .on('finish', resolve);
-      }
-    });
+    const { Readable, Transform } = require('node:stream');
+    const { pipeline } = require('node:stream/promises');
+    if (!res.body) throw new EngineError('Download has no response body', 'network');
+    const meter = new Transform({ transform: (chunk, encoding, callback) => {
+      received += chunk.length;
+      if (received > this.maxZipBytes) return callback(new EngineError('Download exceeded size cap', 'size'));
+      this.onProgress({ url, received, total, ratio: total ? received / total : null });
+      callback(null, chunk);
+    } });
+    try {
+      await pipeline(Readable.fromWeb(res.body), meter, fs.createWriteStream(destFile));
+      if (total && !res.headers.get('content-encoding') && received !== total) throw new EngineError('Download length mismatch', 'network');
+    } catch (e) {
+      fs.rmSync(destFile, { force: true });
+      throw e;
+    }
     return { bytes: received };
   }
 
