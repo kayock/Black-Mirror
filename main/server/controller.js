@@ -323,7 +323,7 @@ class ServerController {
     p.proc = proc;
     p.pid = proc.pid;
     p.startedAt = Date.now();
-    p.modelPath = model;
+    p.modelPath = d.family === 'llama.cpp' ? model : null;
     p.exePath = exe;
     const identity = ownership.snapshotProcess(proc.pid);
     p.startTime = identity?.startTime || null;
@@ -355,7 +355,10 @@ class ServerController {
     if (d.readyProbe && d.readyProbe.type === 'http') {
       const base = `http://127.0.0.1:${opts.port}`;
       p.readyUrl = base + d.readyProbe.path;
-      await this._waitReady(p);
+      try { await this._waitReady(p); } catch (e) {
+        if (e.code === 'ready-timeout' && p.status === 'starting') { p.status = 'degraded'; this._emit('server-state-changed', { id: p.id }); this._saveOwnership(); }
+        throw e;
+      }
     } else {
       p.status = 'running'; // externally managed services without probes
     }
@@ -500,7 +503,7 @@ class ServerController {
    * replacement process is spawned — otherwise a duplicate inference server
    * could be left running when termination remains unresolved.
    */
-  async restart(idOrKey) {
+  async restart(idOrKey, changes = {}) {
     const p = this._resolve(idOrKey);
     if (!p) throw new EngineError(`No managed server "${idOrKey}"`, 'not-found');
     if (p.mode === 'remote') throw new EngineError('Remote endpoints are never restarted by Black Mirror', 'not-owned');
@@ -508,11 +511,13 @@ class ServerController {
     const opts = {
       engineId: p.engineId,
       modelPath: p.model,
-      port: p.port,
-      bind: p.bind,
+      port: changes.port ?? p.port,
+      bind: changes.bind ?? p.bind,
       params: p.params,
       modelDisplayName: p.displayName
     };
+    if (!Number.isInteger(opts.port) || opts.port < 1 || opts.port > 65535 || !['127.0.0.1', '0.0.0.0'].includes(opts.bind)) throw new EngineError('Invalid replacement network configuration', 'config');
+    if (opts.port !== p.port && !(await checkPort(opts.port, opts.bind)).free) throw new EngineError('Replacement port is unavailable; original server left running', 'port-busy');
     const stopResult = await this.stop(idOrKey);
     if (!stopResult || stopResult.confirmed !== true) {
       const detail = stopResult
