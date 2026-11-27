@@ -63,7 +63,7 @@ function initCore() {
       send('server-event', e);
       // Live log stream uses its own channel (Servers view subscribes to it).
       if (e.event === 'server-log') send('server-log', e);
-      if (['server-ready', 'remote-status', 'remote-removed'].includes(e.event)) send('server-state', controller.list());
+      if (['server-ready', 'remote-status', 'remote-removed', 'server-state-changed'].includes(e.event)) send('server-state', controller.list());
       if (e.event === 'server-exit') setTimeout(() => send('server-state', controller.list()), 100);
     }
   });
@@ -188,7 +188,10 @@ function registerIpc() {
     return st ? (st.probedCapabilities || { probed: false, note: st.error || 'not probeable' }) : null;
   });
   handle('engines:install', engineId => installer.install(engineId));
-  handle('engines:uninstall', (engineId, tag) => installer.uninstall(engineId, tag));
+  handle('engines:uninstall', (engineId, tag) => {
+    if (controller.list().some(p => p.mode === 'managed' && p.engineId === engineId && !['stopped','crashed'].includes(p.status))) throw new Error('Stop the managed servers using this engine before removing a version.');
+    return installer.uninstall(engineId, tag);
+  });
   handle('engines:setActive', (engineId, tag) => registry.setActiveVersion(engineId, tag));
   handle('engines:setCustomPath', (engineId, p) => registry.setCustomPath(engineId, p));
   handle('engines:updateSettings', (engineId, s) => registry.updateSettings(engineId, s));
@@ -204,7 +207,7 @@ function registerIpc() {
     return p;
   });
   handle('servers:stop', id => controller.stop(id));
-  handle('servers:restart', id => controller.restart(id));
+  handle('servers:restart', (id, changes) => controller.restart(id, changes));
   handle('servers:logs', id => {
     const p = controller._resolve(id);
     return p ? p.logs.slice(-400) : [];
@@ -214,14 +217,16 @@ function registerIpc() {
   handle('servers:removeRemote', id => controller.removeRemote(id));
   handle('servers:testRemote', idOrUrl => controller.testRemote(idOrUrl));
   // Engine-registry model listing (Ollama / Lemonade manage their own models).
-  handle('servers:engineModels', async engineId => {
+  handle('servers:engineModels', async (engineId, network) => {
     const d = registry.descriptor(engineId);
     const st = (await registry.status()).find(s => s.id === engineId);
     if (!st || st.status !== 'available') throw new Error(`Engine ${engineId} is not available: ${st ? st.error : 'unknown'}`);
     const a = registry.adapter(engineId);
     if (!a.listModels) throw new Error(`Engine ${engineId} does not expose a model registry`);
-    const port = (st.settings && st.settings.port) || d.defaultPort;
-    const bind = (st.settings && st.settings.bind) || d.defaultBind || '127.0.0.1';
+    const port = network?.port ?? ((st.settings && st.settings.port) || d.defaultPort);
+    if (!Number.isInteger(port) || port < 1 || port > 65535) throw new Error('Invalid model discovery port');
+    const bind = network?.bind || (st.settings && st.settings.bind) || d.defaultBind || '127.0.0.1';
+    if (!['127.0.0.1', '0.0.0.0'].includes(bind)) throw new Error('Invalid model discovery binding');
     return a.listModels(`http://${bind === '0.0.0.0' ? '127.0.0.1' : bind}:${port}`, fetch);
   });
 
