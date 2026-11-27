@@ -118,7 +118,7 @@ const ServersView = (() => {
       c.appendChild(actions);
       return c;
     }
-    act('■ Stop', async () => { try { await window.Bridge.servers.stop(s.id); reload(); toast('Server stopped', 'ok'); } catch (e) { toast(e.message, 'err'); } }, 'btn-danger', !running && s.status !== 'starting');
+    act('■ Stop', async () => { try { const result = await window.Bridge.servers.stop(s.id); reload(); toast(result.confirmed ? 'Server stopped' : 'Stop not confirmed; inspect server logs', result.confirmed ? 'ok' : 'err'); } catch (e) { toast(e.message, 'err'); } }, 'btn-danger', !running && s.status !== 'starting');
     act('⟳ Restart', async () => { try { await window.Bridge.servers.restart(s.id); reload(); toast('Restarted', 'ok'); } catch (e) { toast(e.message, 'err'); } }, 'btn-ghost', !running);
     act('▤ Logs', () => selectServer(s));
     c.appendChild(actions);
@@ -165,6 +165,7 @@ const ServersView = (() => {
     form.appendChild(BMUtil.el('p', { class: 'dim small', text: 'The context length you set here is passed to the engine exactly as configured — Black Mirror never silently reduces it.' }));
 
     (async () => {
+      state.config = await window.Bridge.getConfig();
       const [engines, models] = await Promise.all([window.Bridge.engines.status(), window.Bridge.library.list({ onlyValid: true })]);
       const usable = engines.filter(e => e.status === 'available');
 
@@ -241,6 +242,7 @@ const ServersView = (() => {
         BMUtil.el('option', { value: '127.0.0.1', text: '127.0.0.1 — this machine only (recommended)' }),
         BMUtil.el('option', { value: '0.0.0.0', text: '0.0.0.0 — expose to LAN (no auth!)' })
       ]);
+      bindSel.value = state.config.network.bind || '127.0.0.1';
       netGrid.appendChild(BMUtil.el('label', {}, [BMUtil.el('span', { text: 'API port' }), portInput]));
       netGrid.appendChild(BMUtil.el('label', {}, [BMUtil.el('span', { text: 'Network binding' }), bindSel]));
 
