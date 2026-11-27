@@ -28,6 +28,7 @@ const DEFAULTS = {
   },
   benchmark: { promptTokens: 512, genTokens: 128, reps: 2 },
   monitor: { intervalMs: 2000 },
+  lifecycle: { keepServersOnExit: false },
   logging: { level: 'info' }
 };
 
