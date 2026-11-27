@@ -27,6 +27,7 @@ jobs:
       - run: npm ci --no-audit --no-fund
       - run: npm run vendor
       - run: npm run build:win
+      - run: node tests/packaged-persistence.js
       - uses: actions/upload-artifact@v4
         with:
           name: black-mirror-validation-zip
