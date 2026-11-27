@@ -157,10 +157,13 @@ class CompatibilityLab {
 
       // ---- stage: inference (single completion) ----
       try {
+        const modelId = server.models?.includes(cfg.modelPath) ? cfg.modelPath : server.models?.length === 1 ? server.models[0] : null;
+        if (!modelId) throw new Error('Cannot establish exact model identifier for compatibility test');
+        measured.modelId = modelId;
         const t1 = Date.now();
         const res = await this.fetchImpl(`${server.baseUrl}/v1/chat/completions`, {
           method: 'POST', headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ model: 'lab', stream: false, max_tokens: 32, messages: [{ role: 'user', content: 'Reply with the single word: ready.' }] })
+          body: JSON.stringify({ model: measured.modelId, stream: false, max_tokens: 32, messages: [{ role: 'user', content: 'Reply with the single word: ready.' }] })
         });
         const j = await res.json();
         const text = j.choices && j.choices[0] && (j.choices[0].message?.content || j.choices[0].text) || '';
@@ -176,21 +179,32 @@ class CompatibilityLab {
       try {
         const res = await this.fetchImpl(`${server.baseUrl}/v1/chat/completions`, {
           method: 'POST', headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ model: 'lab', stream: true, max_tokens: 24, messages: [{ role: 'user', content: 'Count: one two three' }] })
+          body: JSON.stringify({ model: measured.modelId, stream: true, max_tokens: 24, messages: [{ role: 'user', content: 'Count: one two three' }] })
         });
         if (!res.ok) throw new Error(`Streaming HTTP ${res.status}`);
         if (!res.body) throw new Error('No streaming body');
         const reader = res.body.getReader();
         const dec = new TextDecoder();
-        let chunks = 0, ttft = null;
+        let chunks = 0, ttft = null, buffer = '', complete = false;
         const t2 = Date.now();
         for (;;) {
           const { done, value } = await reader.read();
           if (done) break;
-          if (value && value.length && ttft === null) ttft = Date.now() - t2;
-          chunks++;
+          buffer += dec.decode(value, { stream: true });
+          let end;
+          while ((end = buffer.indexOf('\n')) !== -1) {
+            const line = buffer.slice(0, end).trim(); buffer = buffer.slice(end + 1);
+            if (!line.startsWith('data:')) continue;
+            const payload = line.slice(5).trim();
+            if (payload === '[DONE]') { complete = true; continue; }
+            const event = JSON.parse(payload);
+            if (event.error) throw new Error(event.error.message || 'Inference error');
+            const delta = event.choices?.[0]?.delta;
+            if (delta?.content || delta?.reasoning_content || delta?.reasoning) { if (ttft === null) ttft = Date.now() - t2; chunks++; }
+            if (event.choices?.[0]?.finish_reason) complete = true;
+          }
         }
-        if (chunks < 2) throw new Error(`stream had only ${chunks} chunk(s)`);
+        if (!chunks || !complete) throw new Error('Stream did not contain generated tokens and a completion marker');
         measured.streamChunks = chunks;
         measured.ttftMs = ttft;
         emit('streaming', 'pass', `${chunks} SSE chunks, TTFT ${ttft} ms`);
