@@ -119,11 +119,28 @@ const ServersView = (() => {
       c.appendChild(actions);
       return c;
     }
-    act('■ Stop', async () => { try { const result = await window.Bridge.servers.stop(s.id); reload(); toast(result.confirmed ? 'Server stopped' : 'Stop not confirmed; inspect server logs', result.confirmed ? 'ok' : 'err'); } catch (e) { toast(e.message, 'err'); } }, 'btn-danger', !running && s.status !== 'starting');
+    act('■ Stop', async () => { try { const result = await window.Bridge.servers.stop(s.id); reload(); toast(result.confirmed ? 'Server stopped' : 'Stop not confirmed; inspect server logs', result.confirmed ? 'ok' : 'err'); } catch (e) { toast(e.message, 'err'); } }, 'btn-danger', !running && !['starting','degraded'].includes(s.status));
     act('⟳ Restart', async () => { try { await window.Bridge.servers.restart(s.id); reload(); toast('Restarted', 'ok'); } catch (e) { toast(e.message, 'err'); } }, 'btn-ghost', !running);
+    act('Edit network', () => editNetwork(s), 'btn-ghost', !running);
     act('▤ Logs', () => selectServer(s));
     c.appendChild(actions);
     return c;
+  }
+
+  function editNetwork(s) {
+    const m = modal('Edit server network');
+    const port = BMUtil.el('input', { type: 'number', value: s.port, min: 1, max: 65535 });
+    const bind = BMUtil.el('select', {}, [BMUtil.el('option', { value: '127.0.0.1', text: 'Local only' }), BMUtil.el('option', { value: '0.0.0.0', text: 'LAN (unauthenticated)' })]);
+    bind.value = s.bind;
+    m.appendChild(BMUtil.el('p', { text: 'Applying restarts this server with its saved inference parameters. LAN binding exposes the API without authentication.' }));
+    m.appendChild(port); m.appendChild(bind);
+    m.appendChild(BMUtil.el('button', { text: 'Cancel', onclick: closeModal }));
+    const apply = BMUtil.el('button', { text: 'Apply and restart', onclick: async () => {
+      apply.disabled = true;
+      try { await window.Bridge.servers.restart(s.id, { port: Number(port.value), bind: bind.value }); closeModal(); reload(); }
+      catch (e) { toast(e.message, 'err'); apply.disabled = false; }
+    } });
+    m.appendChild(apply);
   }
 
   function selectServer(s) {
@@ -184,7 +201,7 @@ const ServersView = (() => {
         const eng = usable.find(e => e.id === engineSel.value);
         if (eng && (eng.family === 'ollama' || eng.family === 'lemonade')) {
           try {
-            const list = await window.Bridge.servers.engineModels(eng.id);
+            const list = await window.Bridge.servers.engineModels(eng.id, { port: Number(portInput.value), bind: bindSel.value });
             for (const m of (list || [])) modelSel.appendChild(BMUtil.el('option', { value: m.id, text: `${m.displayName || m.id}${m.parameterSize ? ' · ' + m.parameterSize : ''}${m.quant ? ' · ' + m.quant : ''}` }));
           } catch (e) {
             modelSel.appendChild(BMUtil.el('option', { value: '__none__', text: `(service offline: ${e.message})` }));
@@ -282,6 +299,7 @@ const ServersView = (() => {
       form.appendChild(paramsGrid);
       form.appendChild(netGrid);
       form.appendChild(assessBox);
+      portInput.addEventListener('change', async () => { if (['ollama','lemonade'].includes(usable.find(e => e.id === engineSel.value)?.family)) { await fillModels(); await applyModelProfile(); } });
       await fillModels();
       await applyModelProfile();
 
