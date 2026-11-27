@@ -59,6 +59,7 @@ function initCore() {
   });
   controller = new ServerController(registry, logger, {
     dataDir: dd,
+    persistent: () => config.get('lifecycle.keepServersOnExit', false) === true,
     onEvent: e => {
       send('server-event', e);
       // Live log stream uses its own channel (Servers view subscribes to it).
@@ -149,6 +150,7 @@ function registerIpc() {
 
   // ---- config ----
   handle('config:get', () => config.data);
+  handle('config:openDataFolder', () => shell.openPath(dataDir()));
   handle('config:set', (path, value) => config.set(path, value));
   handle('config:setParams', patch => config.setParams(patch));
 
@@ -330,8 +332,12 @@ function registerAppLifecycle() {
     shuttingDown = true;
     event.preventDefault();
     try {
-      logger.info('app', 'shutdown: stopping managed servers');
-      await controller.stopAll('app-shutdown');
+      if (config.get('lifecycle.keepServersOnExit', false) === true) {
+        await controller.releaseForExit();
+      } else {
+        logger.info('app', 'shutdown: stopping managed servers');
+        await controller.stopAll('app-shutdown');
+      }
       monitor.stop();
       logger.close();
     } catch (e) {
