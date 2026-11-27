@@ -236,6 +236,26 @@ class ServerController {
 
   _emit(event, payload) { this.onEvent({ event, ...payload, ts: Date.now() }); }
 
+  getLogs(id, limit = 400) {
+    const p = this.processes.get(id);
+    if (!p) return [];
+    if (!p.logFile || (!p.persistent && !p.pidRecovered)) return p.logs.slice(-limit);
+    let fd;
+    try {
+      const root = fs.realpathSync(this.logDir);
+      const file = fs.realpathSync(p.logFile);
+      const relative = path.relative(root, file);
+      if (!relative || relative.startsWith('..' + path.sep) || relative === '..' || path.isAbsolute(relative)) return p.logs.slice(-limit);
+      fd = fs.openSync(file, 'r');
+      const size = fs.fstatSync(fd).size;
+      const length = Math.min(size, 256 * 1024);
+      const buf = Buffer.alloc(length);
+      const read = fs.readSync(fd, buf, 0, length, size - length);
+      return buf.subarray(0, read).toString('utf8').split(/\r?\n/).filter(Boolean).slice(-limit);
+    } catch (_) { return p.logs.slice(-limit); }
+    finally { if (fd !== undefined) fs.closeSync(fd); }
+  }
+
   _appendLog(p, stream, line) {
     if (!line) return;
     const entry = `[${new Date().toISOString()}][${stream}] ${line}`;
@@ -377,7 +397,7 @@ class ServerController {
     while (Date.now() < deadline) {
       if (p.status === 'crashed' || !p.proc || p.proc.exitCode !== null) {
         throw new EngineError(
-          `Server exited during startup. Last log lines:\n${p.logs.slice(-8).join('\n')}`,
+          `Server exited during startup. Last log lines:\n${this.getLogs(p.id, 8).join('\n')}`,
           'startup-failed');
       }
       try {
