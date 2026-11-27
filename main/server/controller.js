@@ -75,7 +75,7 @@ class ServerController {
           startTime: p.startTime || null
         }));
       this._ownershipStore.save();
-    } catch (_) { /* non-fatal */ }
+    } catch (e) { this.logger.warn('controller', `Ownership registry save failed: ${e.message}`); }
   }
 
   /**
@@ -143,7 +143,7 @@ class ServerController {
       this._remoteStore.data.nextId = this._nextRemoteId;
       this._remoteStore.data.remotes = [...this.remotes.values()];
       this._remoteStore.save();
-    } catch (_) { /* non-fatal */ }
+    } catch (e) { this.logger.warn('controller', `Remote registry save failed: ${e.message}`); }
   }
 
   /** Remote / external OpenAI-compatible endpoints — CONNECT ONLY, never owned. */
@@ -187,6 +187,8 @@ class ServerController {
     } catch (e) {
       if (rec.id) { rec.status = 'unreachable'; rec.lastError = e.message; }
       return { ok: false, latencyMs: Date.now() - started, error: e.message, models: [] };
+    } finally {
+      if (rec.id) { this._saveRemotes(); this._emit('remote-status', { id: rec.id }); }
     }
   }
 
