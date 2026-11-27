@@ -58,7 +58,7 @@ function _probeUncached(exe, opts = {}) {
     for (const f of LLAMA_HELP_FLAGS) {
       const needle = (f.alt ? f.flag + '|' + f.alt : f.flag);
       const re = new RegExp(`(?:${needle.replace(/[-]/g, '\\$&')})[\\s,)]`);
-      caps.helpFlags[f.id] = re.test(text);
+      caps.helpFlags[f.id] = caps.probed && re.test(text);
     }
   } catch (e) {
     caps.probeError = e.message;
@@ -67,7 +67,7 @@ function _probeUncached(exe, opts = {}) {
   try {
     const dev = spawnSync(exe, ['--list-devices'], { timeout: 15000, encoding: 'utf8', windowsHide: true });
     const out = (dev.stdout || '') + (dev.stderr || '');
-    caps.devices = parseDevices(out);
+    if (dev.status === 0 && !dev.error) caps.devices = parseDevices(out);
   } catch (_) { /* optional */ }
   return caps;
 }
@@ -106,7 +106,8 @@ function summarize(descriptor, caps) {
     reasoningBudget: !!caps.helpFlags.reasoningBudget,
     reasoningSwitch: !!caps.helpFlags.reasoningSwitch,
     images: caps.helpFlags.mmproj ? 'mmproj-supported' : false,
-    kvCacheTypes: caps.helpFlags.kvCacheV ? ['f16', 'q8_0', 'q4_0'] : (caps.helpFlags.kvCacheK ? ['f16', 'q8_0'] : ['f16']),
+    kvCacheTypes: null, // flag presence alone does not prove accepted values
+    kvCacheFlags: { k: !!caps.helpFlags.kvCacheK, v: !!caps.helpFlags.kvCacheV },
     flashAttention: !!caps.helpFlags.flashAttention,
     cpuMoeOffload: !!caps.helpFlags.cpuMoeLayers,
     parallelSlots: !!caps.helpFlags.parallelSlots,
