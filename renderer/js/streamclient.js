@@ -91,6 +91,7 @@ class StreamClient {
           if (j.usage) usage = normalizeUsage(j.usage);
           if (j.error) throw new Error(j.error.message || 'engine error');
           const choice = (j.choices && j.choices[0]) || {};
+          if (choice.finish_reason) serverDone = true;
           const delta = choice.delta || {};
           // reasoning channel: llama.cpp deepseek format / ollama
           const rChunk = delta.reasoning_content !== undefined ? delta.reasoning_content
