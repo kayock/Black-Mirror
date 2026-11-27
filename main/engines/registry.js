@@ -92,6 +92,7 @@ class EngineRegistry {
   /** Register an installed version and optionally make it active. */
   registerVersion(engineId, tag, dir, { activate = true, label } = {}) {
     const st = this.state(engineId);
+    const previous = structuredClone(st);
     const existing = st.versions.find(v => v.tag === tag);
     if (existing) {
       existing.dir = dir;
@@ -100,7 +101,7 @@ class EngineRegistry {
       st.versions.push({ tag, dir, installedAt: Date.now(), label: label || tag });
     }
     if (activate || !st.activeTag) st.activeTag = tag;
-    this.store.save();
+    try { this.store.save(); } catch (e) { this.store.data[engineId] = previous; throw e; }
     return this.state(engineId);
   }
 
