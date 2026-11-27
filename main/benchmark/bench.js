@@ -94,6 +94,8 @@ class BenchRunner {
       });
       loadMs = Date.now() - started; // spawn → readiness (health 200)
       const base = server.baseUrl;
+      const modelId = server.models?.includes(cfg.modelPath) ? cfg.modelPath : server.models?.length === 1 ? server.models[0] : null;
+      if (!modelId) throw new Error('Cannot establish exact benchmark model identifier');
 
       // ---- prompt processing: big prompt, 1 output token ----
       const prompt = buildPrompt(cfg.promptTokens || 512);
@@ -102,7 +104,7 @@ class BenchRunner {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          model: 'benchmark', stream: false, max_tokens: 1,
+          model: modelId, stream: false, max_tokens: 1,
           messages: [{ role: 'user', content: prompt }]
         })
       });
@@ -128,19 +130,20 @@ class BenchRunner {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
-            model: 'benchmark', stream: true, max_tokens: cfg.genTokens || 128,
+            model: modelId, stream: true, max_tokens: cfg.genTokens || 128,
             messages: [{ role: 'user', content: 'Write a detailed story about a mirror.' }]
           })
         });
         // Consume the SSE stream incrementally: first-chunk latency (TTFT),
         // token count from final usage, server-reported gen speed.
+        if (!res2.ok || !res2.body) throw new Error(`Benchmark inference failed: HTTP ${res2.status}`);
         const reader = res2.body.getReader();
         const decoder = new TextDecoder();
         let buf = '';
         for (;;) {
           const { done, value } = await reader.read();
           if (done) break;
-          if (ttftMs === null && value && value.length) ttftMs = Date.now() - t1;
+          // Transport chunks are not generated tokens.
           buf += decoder.decode(value, { stream: true });
           let idx;
           while ((idx = buf.indexOf('\n')) >= 0) {
@@ -151,6 +154,8 @@ class BenchRunner {
             if (payload === '[DONE]') continue;
             try {
               const j = JSON.parse(payload);
+              const delta = j.choices?.[0]?.delta;
+              if (ttftMs === null && (delta?.content || delta?.reasoning || delta?.reasoning_content)) ttftMs = Date.now() - t1;
               if (j.usage && j.usage.completion_tokens) completionTokens = j.usage.completion_tokens;
               if (j.timings && j.timings.predicted_n) {
                 genServerTps = j.timings.predicted_n / (j.timings.predicted_ms / 1000);
@@ -166,7 +171,8 @@ class BenchRunner {
       }
     } finally {
       if (server) {
-        try { await this.controller.stop(server.id); } catch (_) { /* ignore */ }
+        const stopped = await this.controller.stop(server.id);
+        if (!stopped.confirmed) throw new Error('Benchmark server termination not confirmed');
         await sleep(300);
       }
     }
