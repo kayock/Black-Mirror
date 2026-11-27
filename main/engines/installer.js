@@ -191,7 +191,8 @@ class EngineInstaller {
     fs.mkdirSync(path.dirname(dir), { recursive: true });
 
     if (d.install.type === 'github-release-zip') {
-      const asset = await this.resolveAsset(d, resolvedTag, resolved.recentTags || []);
+      const asset = await this.resolveAsset(d, resolvedTag, tag ? [] : (resolved.recentTags || []));
+      if (tag && asset.tag !== tag) throw new EngineError(`Requested version ${tag} is unavailable; refusing substitution`, 'version-unavailable');
       // Disk-space guard: refuse to start a download we cannot finish.
       await this._assertDiskSpace(this.registry.enginesDir, 600 * 1024 * 1024);
       // STAGING: extract into .staging-<tag> and validate BEFORE anything
@@ -222,12 +223,15 @@ class EngineInstaller {
       const finalTag = asset.tag;
       const finalDir = path.join(this.registry.enginesDir, engineId, finalTag);
       const existingFinal = fs.existsSync(finalDir);
-      if (existingFinal) {
-        // Re-install/update: keep the old tree until the new one is in place.
-        fs.renameSync(finalDir, `${finalDir}.old-${Date.now()}`);
+      const backup = existingFinal ? `${finalDir}.old-${Date.now()}` : null;
+      if (backup) fs.renameSync(finalDir, backup);
+      try {
+        if (staging !== finalDir) fs.renameSync(staging, finalDir);
+      } catch (e) {
+        if (backup && !fs.existsSync(finalDir)) fs.renameSync(backup, finalDir);
+        throw e;
       }
-      if (staging !== finalDir) fs.renameSync(staging, finalDir);
-      if (finalDir !== dir) fs.rmSync(dir, { recursive: true, force: true });
+      // Leave other version directories untouched.
       this.registry.registerVersion(engineId, finalTag, finalDir, { activate: true });
       if (this.logger) this.logger.info('installer', `${engineId} ${finalTag} installed+validated at ${finalDir} (tag via ${resolved.via}, asset via ${asset.via})`);
       return { tag: finalTag, dir: finalDir, via: { tag: resolved.via, asset: asset.via }, alreadyInstalled: false, validated: true };
