@@ -48,7 +48,7 @@ function recommendProfile(goal, ctx = {}) {
   const logicalCores = ctx.logicalCores || (hardware && hardware.logicalCores) || 4;
   const threads = Math.max(2, Math.min(logicalCores - 2, 8));
   if (ctx.logicalCores == null && !(hardware && hardware.logicalCores)) {
-    assumptions.push('CPU core count unknown in this context — thread suggestion defaulted to 6.');
+    assumptions.push('CPU core count unknown in this context — thread suggestion defaulted to 2.');
   }
   const ctxTrain = model && model.ctxTrain ? model.ctxTrain : 8192;
   const kvOk = supports('kvCacheV');
@@ -92,7 +92,7 @@ function recommendProfile(goal, ctx = {}) {
     }
     case 'large-context': {
       const target = Math.min(ctxTrain, 65536);
-      base.contextLength = Math.max(16384, Math.min(target, 65536));
+      base.contextLength = target;
       if (kvOk) base.kvCacheType = 'q8_0';
       else notes.push('KV quantization not advertised by this binary — context memory stays at f16.');
       if (faOk) base.flashAttention = true;
