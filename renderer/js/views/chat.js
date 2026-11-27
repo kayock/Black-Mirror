@@ -179,7 +179,7 @@ const ChatView = (() => {
   }
 
   function activeServer() {
-    return state.servers.find(s => s.status === 'running' || s.status === 'starting') || null;
+    return state.servers.find(s => s.status === 'running') || null;
   }
 
   function editMessage(m) {
@@ -458,6 +458,7 @@ const ChatView = (() => {
       if (thinkingMode === 'off' && streamedReasoning) {
         toast('Thinking mode is Off, but this model still emitted reasoning. The backend/template may not honor enable_thinking=false.', 'warn');
       }
+      if (!result.stopped && result.serverDone === false) toast('Stream ended without a completion marker; response may be incomplete.', 'warn');
       const saved = await persist({
         content: streamed || (result.stopped ? '(stopped)' : '(empty response)'),
         reasoning: streamedReasoning || null,
@@ -465,7 +466,7 @@ const ChatView = (() => {
         tps,
         model: modelLabel,
         engineId: server.engineId || null,
-        stopped: result.stopped
+        stopped: result.stopped || result.serverDone === false
       });
       bubble.innerHTML = '';
       const rendered = renderMessage(saved);
