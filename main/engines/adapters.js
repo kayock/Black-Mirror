@@ -46,6 +46,32 @@ class EngineError extends Error {
   }
 }
 
+// Preserve quoted paths, including Windows backslashes. Refuse overrides of
+// structured settings instead of silently changing the requested launch.
+function extraLaunchArgs(raw, reserved) {
+  const tokens = [];
+  let token = '', quote = null, started = false;
+  for (const ch of String(raw || '')) {
+    if (quote) {
+      if (ch === quote) quote = null;
+      else token += ch;
+    } else if (ch === '"' || ch === "'") { quote = ch; started = true; }
+    else if (/\s/.test(ch)) {
+      if (started) { tokens.push(token); token = ''; started = false; }
+    } else { token += ch; started = true; }
+  }
+  if (quote) throw new EngineError('Unterminated quote in extra launch arguments', 'invalid-args');
+  if (started) tokens.push(token);
+  for (const t of tokens) {
+    const flag = t.split('=')[0];
+    if (reserved.has(flag) || /^-(?:m|c|t|b|ngl|np)\d/.test(flag)) {
+      throw new EngineError(`Extra argument ${flag} conflicts with a managed launch setting; use the corresponding setting instead.`, 'invalid-args');
+    }
+  }
+  return tokens;
+}
+const MANAGED_LLAMA_FLAGS = new Set(['-m','--model','--model-url','-mu','-hf','--hf-repo','--hf-file','--host','--port','-c','--ctx-size','-t','--threads','-tb','--threads-batch','-ngl','--n-gpu-layers','--gpu-layers','-b','--batch-size','-np','--parallel','--cache-type-k','--cache-type-v','-ctk','-ctv','--mmap','--no-mmap','--flash-attn','-fa','--reasoning','-rea','--reasoning-budget','--reasoning-format','--chat-template-kwargs','--jinja','--no-jinja','--mmproj','--n-cpu-moe','--alias','-a']);
+
 /** Family: llama.cpp — llama-server with CLI flags. */
 class LlamaCppAdapter {
   /**
@@ -154,7 +180,7 @@ class LlamaCppAdapter {
       if (mm) args.push(...mm);
     }
     if (p.extraArgs) {
-      for (const a of String(p.extraArgs).split(/\s+/).filter(Boolean)) args.push(a);
+      args.push(...extraLaunchArgs(p.extraArgs, MANAGED_LLAMA_FLAGS));
     }
     return args;
   }
@@ -289,7 +315,7 @@ class LemonadeAdapter {
     if (network && network.port) args.push('--port', String(network.port));
     if (network && network.bind && network.bind !== '127.0.0.1') args.push('--host', network.bind);
     if (params && params.extraArgs) {
-      for (const a of String(params.extraArgs).split(/\s+/).filter(Boolean)) args.push(a);
+      args.push(...extraLaunchArgs(params.extraArgs, new Set(['--port','--host','-p'])));
     }
     return args;
   }
