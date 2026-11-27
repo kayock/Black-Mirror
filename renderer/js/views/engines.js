@@ -74,7 +74,7 @@ const EnginesView = (() => {
           BMUtil.el('span', { text: v.label }),
           BMUtil.el('span', { text: v.installedAt ? new Date(v.installedAt).toLocaleDateString() : '', class: 'dim small' }),
           BMUtil.el('span', { class: 'spacer' }),
-          !v.active ? BMUtil.el('button', { class: 'btn btn-ghost btn-sm', text: 'activate (rollback)', onclick: async () => { await window.Bridge.engines.setActive(e.id, v.tag); reload(); toast(`Switched ${e.displayName} to ${v.label}`, 'ok'); } }) : null,
+          !v.active ? BMUtil.el('button', { class: 'btn btn-ghost btn-sm', text: 'activate (rollback)', onclick: async () => { try { await window.Bridge.engines.setActive(e.id, v.tag); reload(); toast(`Switched ${e.displayName} to ${v.label}`, 'ok'); } catch (err) { toast(err.message, 'err'); } } }) : null,
           BMUtil.el('button', { class: 'btn btn-ghost btn-sm', text: 'remove', onclick: async () => {
             if (!(await uiConfirm('Remove engine version', `Remove installed version ${v.label}? Only files inside Black Mirror's engines folder are deleted.`))) return;
             await window.Bridge.engines.uninstall(e.id, v.tag); reload();
@@ -102,6 +102,23 @@ const EnginesView = (() => {
         catch (err) { toast(err.message, 'err'); installBtn.disabled = false; installBtn.textContent = '⬇ Install'; }
       });
       actions.appendChild(installBtn);
+    }
+    if (e.installed && e.install?.type === 'github-release-zip' && !e.customPath) {
+      const check = BMUtil.el('button', { class: 'btn btn-ghost btn-sm', text: 'Check for updates' });
+      check.addEventListener('click', async () => {
+        check.disabled = true;
+        try {
+          const result = await window.Bridge.enginesExtra.checkUpdate(e.id);
+          if (result.reason) { toast(result.reason, 'warn'); return; }
+          if (!result.updateAvailable) { toast('Current version is up to date', 'ok'); return; }
+          if (!(await uiConfirm('Install engine version', `Install ${result.latestTag}? Existing versions are retained.`, { danger: false, confirmLabel: 'Install' }))) return;
+          await window.Bridge.engines.install(e.id, result.latestTag);
+          toast('Engine version installed', 'ok');
+          reload();
+        } catch (err) { toast(err.message, 'err'); }
+        finally { check.disabled = false; }
+      });
+      actions.appendChild(check);
     }
     actions.appendChild(BMUtil.el('button', { class: 'btn btn-ghost btn-sm', text: 'Custom executable path…', onclick: () => setCustomPath(e) }));
     c.appendChild(actions);
