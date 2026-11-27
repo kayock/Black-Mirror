@@ -57,7 +57,7 @@ class Diagnostics {
       };
     } catch (_) { /* optional */ }
     try {
-      out.managedProcesses = c.controller.list().filter(p => p.mode === 'managed').map(p => ({ id: p.id, pid: p.pid, model: p.model, port: p.port, status: p.status, recovered: !!p.pidRecovered }));
+      out.managedProcesses = c.controller.list().filter(p => p.mode === 'managed').map(p => ({ id: p.id, pid: p.pid, model: p.model, port: p.port, bind: p.bind, baseUrl: p.baseUrl, status: p.status, recovered: !!p.pidRecovered }));
       out.remotes = c.controller.list().filter(p => p.mode === 'remote').map(p => ({ id: p.id, baseUrl: p.baseUrl, status: p.status }));
       out.unverifiedRecovered = (c.controller.recoveredExternal || []).map(r => ({ pid: r.pid, engineId: r.engineId, reason: r.reason, exe: r.snapshot && r.snapshot.exe }));
     } catch (_) { /* optional */ }
@@ -68,7 +68,7 @@ class Diagnostics {
         if (s.installed && s.id !== 'ollama' && s.id !== 'lemonade') {
           // check a fixed probe set around the app default
           const port = ({ 'llamacpp-cpu': 8081, 'llamacpp-vulkan': 8082, 'llamacpp-sycl': 8083 })[s.id];
-          if (port) out.portConflicts.push({ engineId: s.id, port, occupied: await checkPort(port, '127.0.0.1') });
+          if (port) out.portConflicts.push({ engineId: s.id, port, occupied: !(await checkPort(port, '127.0.0.1')).free });
         }
       }
     } catch (_) { /* optional */ }
