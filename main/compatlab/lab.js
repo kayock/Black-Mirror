@@ -63,7 +63,7 @@ class CompatibilityLab {
 
   results() {
     return (this.store.data.results || []).map(r => {
-      const stale = this.staleReason(r, r);
+      const stale = r.staleReason || this.staleReason(r, r);
       return { ...r, stale: !!stale, staleReason: stale || null };
     }).sort((a, b) => b.at - a.at);
   }
@@ -85,7 +85,7 @@ class CompatibilityLab {
       }
     }
     if (!best) return null;
-    const stale = this.staleReason(best, cfg);
+    const stale = best.staleReason || this.staleReason(best, cfg);
     return stale ? { ...best, stale: true, staleReason: stale } : best;
   }
 
@@ -178,6 +178,8 @@ class CompatibilityLab {
           method: 'POST', headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ model: 'lab', stream: true, max_tokens: 24, messages: [{ role: 'user', content: 'Count: one two three' }] })
         });
+        if (!res.ok) throw new Error(`Streaming HTTP ${res.status}`);
+        if (!res.body) throw new Error('No streaming body');
         const reader = res.body.getReader();
         const dec = new TextDecoder();
         let chunks = 0, ttft = null;
