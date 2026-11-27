@@ -188,8 +188,7 @@ class EngineInstaller {
       return { tag: resolvedTag, via: resolved.via, dir: existing.dir, alreadyInstalled: true };
     }
     const dir = path.join(this.registry.enginesDir, engineId, resolvedTag);
-    fs.rmSync(dir, { recursive: true, force: true });
-    fs.mkdirSync(dir, { recursive: true });
+    fs.mkdirSync(path.dirname(dir), { recursive: true });
 
     if (d.install.type === 'github-release-zip') {
       const asset = await this.resolveAsset(d, resolvedTag, resolved.recentTags || []);
@@ -322,7 +321,7 @@ class EngineInstaller {
     // Safety: only remove inside our engines dir.
     const base = path.resolve(this.registry.enginesDir);
     const dir = path.resolve(v.dir);
-    if (!dir.startsWith(base)) {
+    if (!dir.startsWith(base + path.sep)) {
       throw new EngineError('Refusing to remove a directory outside Black Mirror engines folder', 'safety');
     }
     fs.rmSync(dir, { recursive: true, force: true });
