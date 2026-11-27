@@ -92,6 +92,7 @@ const ServersView = (() => {
       running ? BMUtil.el('span', { class: 'server-addr mono', text: s.baseUrl + '/v1', title: 'Copy API endpoint', onclick: () => { navigator.clipboard.writeText(s.baseUrl + '/v1'); toast('Endpoint copied', 'ok'); } }) : null,
       s.startedAt ? BMUtil.el('span', { class: 'dim small', text: `up ${BMUtil.formatDuration((Date.now() - s.startedAt) / 1000)} · pid ${s.pid}` }) : null
     ]);
+    for (const url of (s.lanUrls || [])) head.appendChild(BMUtil.el('button', { class: 'btn btn-ghost btn-sm', text: `Copy LAN: ${url}`, onclick: e => { e.stopPropagation(); navigator.clipboard.writeText(url); } }));
     head.addEventListener('click', () => selectServer(s));
     c.appendChild(head);
 
