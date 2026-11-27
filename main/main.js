@@ -47,10 +47,10 @@ function dataDir() {
 function initCore() {
   const dd = dataDir();
   fs.mkdirSync(dd, { recursive: true });
-  logger = new Logger(path.join(dd, 'logs'), process.env.BLACK_MIRROR_LOG_LEVEL || 'info');
+  config = new Config(dd);
+  logger = new Logger(path.join(dd, 'logs'), process.env.BLACK_MIRROR_LOG_LEVEL || config.get('logging.level', 'info'));
   logger.info('app', `Black Mirror starting; data dir ${dd}`);
   bus = new Emitter();
-  config = new Config(dd);
   conversations = new Conversations(dd, logger);
   library = new ModelLibrary(dd, logger);
   registry = new EngineRegistry(dd, logger);
