@@ -323,9 +323,10 @@ class EngineInstaller {
     const v = st.versions.find(v => v.tag === tag);
     if (!v) throw new EngineError(`Version ${tag} not installed`, 'not-installed');
     // Safety: only remove inside our engines dir.
-    const base = path.resolve(this.registry.enginesDir);
-    const dir = path.resolve(v.dir);
-    if (!dir.startsWith(base + path.sep)) {
+    const base = fs.realpathSync(this.registry.enginesDir);
+    const dir = fs.realpathSync(v.dir);
+    const relative = path.relative(base, dir);
+    if (!relative || relative === '..' || relative.startsWith('..' + path.sep) || path.isAbsolute(relative)) {
       throw new EngineError('Refusing to remove a directory outside Black Mirror engines folder', 'safety');
     }
     fs.rmSync(dir, { recursive: true, force: true });
