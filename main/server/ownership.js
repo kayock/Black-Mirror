@@ -98,13 +98,15 @@ function isAlive(pid) {
 function verifyOwnership(record, snapshot) {
   if (!record) return { owned: false, reason: 'no ownership record' };
   if (!snapshot) return { owned: false, reason: `pid ${record.pid} not running` };
+  if (Number(record.pid) !== Number(snapshot.pid)) return { owned: false, reason: 'PID mismatch' };
   if (!record.startTime || !snapshot.startTime || !record.exePath || !snapshot.exe) return { owned: false, reason: 'required process identity evidence missing' };
   if (String(record.startTime) !== String(snapshot.startTime)) {
     return { owned: false, reason: 'start time mismatch — PID was likely reused by another process' };
   }
   if (record.exePath && snapshot.exe) {
-    const a = String(record.exePath).toLowerCase();
-    const b = String(snapshot.exe).toLowerCase();
+    const normalize = value => process.platform === 'win32' ? String(value).toLowerCase().replace(/\\/g, '/') : String(value);
+    const a = normalize(record.exePath);
+    const b = normalize(snapshot.exe);
     if (a !== b) {
       return { owned: false, reason: `executable mismatch: expected ${record.exePath}, found ${snapshot.exe}` };
     }
