@@ -63,7 +63,7 @@ function initCore() {
       send('server-event', e);
       // Live log stream uses its own channel (Servers view subscribes to it).
       if (e.event === 'server-log') send('server-log', e);
-      if (e.event === 'server-ready') send('server-state', controller.list());
+      if (['server-ready', 'remote-status', 'remote-removed'].includes(e.event)) send('server-state', controller.list());
       if (e.event === 'server-exit') setTimeout(() => send('server-state', controller.list()), 100);
     }
   });
