@@ -36,6 +36,10 @@ const SettingsView = (() => {
       BMUtil.el('span', { class: 'hint', text: 'llama.cpp builds default to 8081/8082/8083 per engine; Ollama uses 11434 and Lemonade 8000. Ports in use are detected before launch.' })
     ]));
     box.appendChild(save);
+    const persist = BMUtil.el('input', { type: 'checkbox' });
+    persist.checked = state.config.lifecycle?.keepServersOnExit === true;
+    box.appendChild(BMUtil.el('label', { class: 'check' }, [persist, BMUtil.el('span', { text: 'Keep eligible managed servers running after closing Black Mirror (applies to new launches)' })]));
+    persist.addEventListener('change', async () => { await window.Bridge.setConfig('lifecycle.keepServersOnExit', persist.checked); toast('Server exit preference saved', 'ok'); });
   }
 
   function renderParams() {
@@ -85,7 +89,7 @@ const SettingsView = (() => {
       BMUtil.el('span', { text: 'Diagnostic log level' }), sel,
       BMUtil.el('span', { class: 'hint', text: `Logs are written under the Black Mirror data directory (logs/blackmirror-*.log). App version ${window.Bridge.versions.app} · Electron ${window.Bridge.versions.electron || 'n/a'}` })
     ]));
-    box.appendChild(BMUtil.el('button', { class: 'btn btn-ghost btn-sm', text: 'Open data folder', onclick: () => toast('Data folder: %APPDATA%\\BlackMirror', 'ok') }));
+    box.appendChild(BMUtil.el('button', { class: 'btn btn-ghost btn-sm', text: 'Open data folder', onclick: async () => { const error = await window.Bridge.openDataFolder(); if (error) toast(error, 'err'); } }));
     box.appendChild(BMUtil.el('button', { class: 'btn btn-ghost btn-sm', style: 'margin-left:8px', text: 'Save log level', onclick: async () => {
       await window.Bridge.setConfig('logging.level', sel.value);
       toast('Log level saved (applies on next start)', 'ok');
