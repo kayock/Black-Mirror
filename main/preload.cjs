@@ -18,6 +18,7 @@ const invoke = async (channel, ...args) => {
 contextBridge.exposeInMainWorld('blackMirror', {
   // config
   getConfig: () => invoke('config:get'),
+  openDataFolder: () => invoke('config:openDataFolder'),
   setConfig: (path, value) => invoke('config:set', path, value),
   setParams: (patch) => invoke('config:setParams', patch),
 
