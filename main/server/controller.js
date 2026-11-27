@@ -44,6 +44,7 @@ class ServerController {
     /** key -> {pid, proc, engineId, model, port, bind, startedAt, logs, status, logFile} */
     this.processes = new Map();
     this.onEvent = opts.onEvent || (() => {});
+    this.persistent = opts.persistent || (() => false);
     this.readyTimeoutMs = opts.readyTimeoutMs || 180000;
     this.fetchImpl = opts.fetchImpl || ((...a) => fetch(...a));
     this._nextId = 1;
@@ -73,7 +74,7 @@ class ServerController {
           id: p.id, pid: p.pid, engineId: p.engineId, model: p.model,
           modelPath: p.modelPath || null, port: p.port, bind: p.bind, models: p.models,
           startedAt: p.startedAt, exePath: p.exePath || null,
-          params: p.params, displayName: p.displayName, family: p.family, readyUrl: p.readyUrl,
+          params: p.params, displayName: p.displayName, family: p.family, readyUrl: p.readyUrl, logFile: p.logFile, persistent: p.persistent === true,
           startTime: p.startTime || null, cmdline: p.cmdline || null
         }));
       this._ownershipStore.save();
@@ -103,7 +104,7 @@ class ServerController {
           family: rec.family || null, displayName: rec.displayName || (rec.model ? path.win32.basename(String(rec.model)) : rec.engineId),
           port: rec.port, bind: rec.bind, params: rec.params || null, startedAt: rec.startedAt,
           pidRecovered: true, exePath: rec.exePath, startTime: rec.startTime, cmdline: rec.cmdline, modelPath: rec.modelPath, models: rec.models,
-          proc: null, logs: [], status: 'running', logFile: null,
+          proc: null, logs: [], status: 'running', logFile: rec.logFile || null, persistent: rec.persistent === true,
           readyUrl: rec.readyUrl || (rec.port ? `http://127.0.0.1:${rec.port}/health` : null), adapter: 'openai'
         };
         this.processes.set(rec.id, p);
@@ -310,16 +311,20 @@ class ServerController {
     this._emit('server-starting', { id, engineId: opts.engineId, model, port: opts.port });
 
     let proc;
+    p.persistent = this.persistent() === true;
+    let logFd;
     try {
+      if (p.persistent) logFd = fs.openSync(logFile, 'a');
       proc = spawn(exe, args, {
+        detached: p.persistent,
         windowsHide: true,
-        stdio: ['ignore', 'pipe', 'pipe'],
+        stdio: p.persistent ? ['ignore', logFd, logFd] : ['ignore', 'pipe', 'pipe'],
         env: { ...process.env, ...(opts.env || {}), ...(d.family === 'ollama' ? { OLLAMA_HOST: `${network.bind}:${network.port}` } : {}) }
       });
     } catch (e) {
       this.processes.delete(id);
       throw new EngineError(`Failed to spawn ${exe}: ${e.message}`, 'spawn');
-    }
+    } finally { if (logFd !== undefined) fs.closeSync(logFd); }
     p.proc = proc;
     p.pid = proc.pid;
     p.startedAt = Date.now();
@@ -331,8 +336,8 @@ class ServerController {
     this._saveOwnership();
     this.logger.info('controller', `started pid=${proc.pid} engine=${d.id} model=${model} port=${opts.port}`, { args });
 
-    proc.stdout.on('data', chunk => String(chunk).split(/\r?\n/).forEach(l => this._appendLog(p, 'out', l)));
-    proc.stderr.on('data', chunk => String(chunk).split(/\r?\n/).forEach(l => this._appendLog(p, 'err', l)));
+    proc.stdout?.on('data', chunk => String(chunk).split(/\r?\n/).forEach(l => this._appendLog(p, 'out', l)));
+    proc.stderr?.on('data', chunk => String(chunk).split(/\r?\n/).forEach(l => this._appendLog(p, 'err', l)));
     proc.on('exit', (code, signal) => {
       const wasIntentional = p.status === 'stopping';
       p.status = wasIntentional ? 'stopped' : (code === 0 ? 'stopped' : 'crashed');
@@ -526,6 +531,17 @@ class ServerController {
    * Graceful shutdown of everything WE started (app quit). Returns per-process
    * outcomes; unresolved terminations stay recorded and are reported.
    */
+  async releaseForExit() {
+    for (const p of [...this.processes.values()]) {
+      if (p.persistent && ownership.verifyOwnership(p, ownership.snapshotProcess(p.pid)).owned) {
+        if (p.proc) p.proc.unref();
+      } else {
+        try { await this.stop(p.id); } catch (e) { this.logger.warn('controller', `Shutdown stop failed: ${e.message}`); }
+      }
+    }
+    this._saveOwnership();
+  }
+
   async stopAll(reason = 'app-shutdown') {
     const ids = [...this.processes.keys()];
     this.logger.info('controller', `stopping ${ids.length} managed server(s): ${reason}`);
