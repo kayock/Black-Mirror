@@ -142,12 +142,18 @@ class EngineInstaller {
     fs.mkdirSync(destDir, { recursive: true });
     const isTarGz = archiveFile.toLowerCase().endsWith('.tar.gz') || archiveFile.toLowerCase().endsWith('.tgz');
     if (isWindows() && !isTarGz) {
+      // Windows PowerShell Expand-Archive can skip hidden/dot-prefixed inputs
+      // and report non-terminating errors with exit code zero. Use the ZIP API
+      // with terminating errors and literal, environment-provided paths.
       await new Promise((resolve, reject) => {
         const p = spawn('powershell.exe', [
           '-NoProfile', '-NonInteractive', '-Command',
-          `Expand-Archive -LiteralPath '${archiveFile.replace(/'/g, "''")}' -DestinationPath '${destDir.replace(/'/g, "''")}' -Force`
-        ], { windowsHide: true });
-        p.on('exit', c => c === 0 ? resolve() : reject(new EngineError(`Expand-Archive exited ${c}`, 'extract')));
+          "$ErrorActionPreference = 'Stop'; Add-Type -AssemblyName System.IO.Compression.FileSystem; [System.IO.Compression.ZipFile]::ExtractToDirectory($env:BM_ARCHIVE_FILE, $env:BM_EXTRACT_DIR)"
+        ], { windowsHide: true, env: { ...process.env, BM_ARCHIVE_FILE: path.resolve(archiveFile), BM_EXTRACT_DIR: path.resolve(destDir) } });
+        let errors = '';
+        p.stderr.on('data', chunk => { errors = (errors + chunk).slice(-4096); });
+        p.stdout.resume();
+        p.on('close', c => c === 0 ? resolve() : reject(new EngineError(`ZIP extraction exited ${c}: ${errors}`, 'extract')));
         p.on('error', reject);
       });
     } else if (isTarGz) {
