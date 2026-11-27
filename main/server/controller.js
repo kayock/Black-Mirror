@@ -436,31 +436,17 @@ class ServerController {
         });
         result.killed = result.taskkillExit === 0;
       } else {
-        try { process.kill(pid, 'SIGTERM'); } catch (_) { result.killed = true; /* already gone */ }
-        const gone = await Promise.race([
-          new Promise(resolve => {
-            if (p.proc && (p.proc.exitCode !== null || p.proc.signalCode || p.proc.killed)) return resolve();
-            if (p.proc) p.proc.once('exit', resolve);
-            else { // recovered record without a live child handle: poll liveness
-              const iv = setInterval(() => { if (!ownership.isAlive(pid)) { clearInterval(iv); resolve(); } }, 100);
-              setTimeout(() => { clearInterval(iv); resolve(); }, 10000);
-            }
-          }),
-          sleep(10000)
-        ]);
-        if (!gone) {
-          try { process.kill(pid, 'SIGKILL'); } catch (_) { /* already gone */ }
-          await Promise.race([
-            new Promise(resolve => {
-              if (p.proc && (p.proc.exitCode !== null || p.proc.signalCode)) return resolve();
-              if (p.proc) p.proc.once('exit', resolve);
-              else {
-                const iv = setInterval(() => { if (!ownership.isAlive(pid)) { clearInterval(iv); resolve(); } }, 100);
-                setTimeout(() => { clearInterval(iv); resolve(); }, 5000);
-              }
-            }),
-            sleep(5000)
-          ]);
+        const exited = () => p.proc ? p.proc.exitCode !== null || p.proc.signalCode !== null : !ownership.isAlive(pid);
+        const stillOwned = () => !exited() && (!p.pidRecovered || ownership.verifyOwnership(p, ownership.snapshotProcess(pid)).owned);
+        const waitExit = async ms => {
+          const end = Date.now() + ms;
+          while (!exited() && Date.now() < end) await sleep(100);
+          return exited();
+        };
+        if (stillOwned()) { try { if (p.proc) p.proc.kill('SIGTERM'); else process.kill(pid, 'SIGTERM'); } catch (_) { /* exit race */ } }
+        if (!(await waitExit(10000)) && stillOwned()) {
+          try { if (p.proc) p.proc.kill('SIGKILL'); else process.kill(pid, 'SIGKILL'); } catch (_) { /* exit race */ }
+          await waitExit(5000);
         }
         result.killed = true;
       }
