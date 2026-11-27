@@ -179,10 +179,12 @@ class StreamClient {
   /** Non-streaming helper (benchmarks, connection tests). */
   static async complete(opts) {
     const fetchImpl = opts.fetchImpl || (typeof fetch !== 'undefined' ? fetch : null);
+    const thinking = opts.thinking || (opts.params && opts.params.thinkingMode) || 'auto';
+    const thinkingOverrides = thinking === 'off' ? { think: false, chat_template_kwargs: { enable_thinking: false }, reasoning_budget: 0 } : thinking === 'on' ? { think: true, chat_template_kwargs: { enable_thinking: true } } : {};
     const res = await fetchImpl(`${opts.baseUrl.replace(/\/+$/, '').replace(/\/v1$/i, '')}/v1/chat/completions`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ model: opts.model || 'default', messages: opts.messages || [], stream: false, ...buildSampling(opts.params) }),
+      body: JSON.stringify({ model: opts.model || 'default', messages: opts.messages || [], stream: false, ...buildSampling(opts.params), ...thinkingOverrides }),
       signal: opts.signal
     });
     if (!res.ok) throw new Error(`Request failed: HTTP ${res.status}`);
