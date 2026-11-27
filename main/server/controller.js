@@ -194,7 +194,7 @@ class ServerController {
     const managed = [...this.processes.values()].map(p => this._public(p));
     const remote = [...this.remotes.values()].map(r => ({
       id: r.id, engineId: 'remote', model: r.model, displayName: r.label,
-      status: r.status === 'connected' ? 'running' : r.status === 'unreachable' ? 'crashed' : 'unknown',
+      status: r.status === 'connected' ? 'running' : r.status === 'unreachable' ? 'unreachable' : 'unknown',
       mode: 'remote', pid: null, port: null, bind: null, startedAt: r.addedAt,
       baseUrl: r.baseUrl, logLines: 0, models: r.models || null
     }));
@@ -216,6 +216,7 @@ class ServerController {
       pidRecovered: !!p.pidRecovered,
       exePath: p.exePath || null,
       baseUrl: `http://${p.bind === '0.0.0.0' ? '127.0.0.1' : p.bind}:${p.port}`,
+      lanUrls: p.bind === '0.0.0.0' ? Object.values(require('os').networkInterfaces()).flat().filter(n => n && !n.internal && (n.family === 'IPv4' || n.family === 4)).map(n => `http://${n.address}:${p.port}/v1`) : [],
       logLines: p.logs.length
     };
   }
@@ -272,7 +273,9 @@ class ServerController {
     let exe;
     try { exe = adapter.executablePath(); }
     catch (e) { throw e; }
-    const args = adapter.buildServerArgs(model, opts.params, { port: opts.port, bind: opts.bind || '127.0.0.1' });
+    const network = { port: opts.port, bind: opts.bind || '127.0.0.1' };
+    const launchAdapter = d.family === 'llama.cpp' ? this.registry.adapter(opts.engineId, require('../engines/capabilities').probe(exe)) : adapter;
+    const args = launchAdapter.buildServerArgs(model, opts.params, network);
 
     const id = 'srv-' + (this._nextId++);
     const stamp = new Date().toISOString().replace(/[:.]/g, '-');
@@ -295,7 +298,7 @@ class ServerController {
       proc = spawn(exe, args, {
         windowsHide: true,
         stdio: ['ignore', 'pipe', 'pipe'],
-        env: { ...process.env, ...(opts.env || {}) }
+        env: { ...process.env, ...(opts.env || {}), ...(d.family === 'ollama' ? { OLLAMA_HOST: `${network.bind}:${network.port}` } : {}) }
       });
     } catch (e) {
       this.processes.delete(id);
