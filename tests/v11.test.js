@@ -198,7 +198,7 @@ describe('Remote endpoints (connect-only, never owned)', () => {
     const test = await ctl.testRemote(rec.id);
     assert.equal(test.ok, false);
     assert.ok(test.error);
-    assert.equal(ctl.list().find(x => x.id === rec.id).status, 'crashed');
+    assert.equal(ctl.list().find(x => x.id === rec.id).status, 'unreachable');
     fs.rmSync(dir, { recursive: true, force: true });
   });
 
