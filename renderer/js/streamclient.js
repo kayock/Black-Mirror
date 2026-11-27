@@ -53,7 +53,7 @@ class StreamClient {
       body.reasoning_budget = 0;
     }
 
-    const res = await fetchImpl(`${opts.baseUrl}/v1/chat/completions`, {
+    const res = await fetchImpl(`${opts.baseUrl.replace(/\/+$/, '').replace(/\/v1$/i, '')}/v1/chat/completions`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(body),
@@ -179,7 +179,7 @@ class StreamClient {
   /** Non-streaming helper (benchmarks, connection tests). */
   static async complete(opts) {
     const fetchImpl = opts.fetchImpl || (typeof fetch !== 'undefined' ? fetch : null);
-    const res = await fetchImpl(`${opts.baseUrl}/v1/chat/completions`, {
+    const res = await fetchImpl(`${opts.baseUrl.replace(/\/+$/, '').replace(/\/v1$/i, '')}/v1/chat/completions`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ model: opts.model || 'default', messages: opts.messages || [], stream: false, ...buildSampling(opts.params) }),
