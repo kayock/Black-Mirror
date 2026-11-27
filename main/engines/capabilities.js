@@ -53,7 +53,7 @@ function _probeUncached(exe, opts = {}) {
   try {
     const help = spawnSync(exe, ['--help'], { timeout: opts.timeout || 15000, encoding: 'utf8', windowsHide: true });
     const text = (help.stdout || '') + (help.stderr || '');
-    caps.probed = help.status === 0 || text.length > 0;
+    caps.probed = help.status === 0 && text.length > 0 && !help.error;
     caps.probeError = caps.probed ? null : `exit ${help.status}`;
     for (const f of LLAMA_HELP_FLAGS) {
       const needle = (f.alt ? f.flag + '|' + f.alt : f.flag);
