@@ -210,10 +210,7 @@ function registerIpc() {
   });
   handle('servers:stop', id => controller.stop(id));
   handle('servers:restart', (id, changes) => controller.restart(id, changes));
-  handle('servers:logs', id => {
-    const p = controller._resolve(id);
-    return p ? p.logs.slice(-400) : [];
-  });
+  handle('servers:logs', id => controller.getLogs(id));
   // Remote / external endpoints: connect-only, never owned or stopped.
   handle('servers:addRemote', opts => controller.addRemote(opts));
   handle('servers:removeRemote', id => controller.removeRemote(id));
