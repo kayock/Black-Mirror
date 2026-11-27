@@ -48,6 +48,7 @@ const SettingsView = (() => {
       let input;
       if (f.type === 'enum') input = BMUtil.el('select', {}, f.options.map(o => BMUtil.el('option', { value: o, text: o, selected: o === val ? '' : null })));
       else if (f.type === 'bool') { input = BMUtil.el('input', { type: 'checkbox' }); input.checked = !!val; }
+      else if (f.type === 'string' || f.type === 'path') input = BMUtil.el('input', { type: 'text', value: val || '' });
       else input = BMUtil.el('input', { type: 'number', min: f.min, max: f.max, step: f.step || 1, value: val });
       inputs[f.id] = input;
       grid.appendChild(BMUtil.el('label', {}, [BMUtil.el('span', { text: f.label }), input]));
@@ -126,7 +127,7 @@ function uiPrompt(title, { placeholder = '', value = '', hint = '' } = {}) {
     const input = BMUtil.el('input', { type: 'text', placeholder, 'aria-label': title });
     input.value = value || '';
     const done = (result) => { closeModal(); resolve(result); };
-    const submit = () => done(input.value.trim() || null);
+    const submit = () => done(input.value.trim());
     m.appendChild(BMUtil.el('div', { class: 'settings-row' }, [
       input,
       hint ? BMUtil.el('span', { class: 'hint', text: hint }) : null
