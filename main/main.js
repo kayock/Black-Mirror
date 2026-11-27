@@ -189,12 +189,22 @@ function registerIpc() {
     const st = (await registry.status()).find(s => s.id === engineId);
     return st ? (st.probedCapabilities || { probed: false, note: st.error || 'not probeable' }) : null;
   });
-  handle('engines:install', engineId => installer.install(engineId));
+  handle('engines:install', (engineId, tag) => {
+    if (controller.list().some(p => p.mode === 'managed' && p.engineId === engineId && !['stopped','crashed'].includes(p.status))) throw new Error('Stop managed servers using this engine before installing another version.');
+    return installer.install(engineId, { tag });
+  });
   handle('engines:uninstall', (engineId, tag) => {
     if (controller.list().some(p => p.mode === 'managed' && p.engineId === engineId && !['stopped','crashed'].includes(p.status))) throw new Error('Stop the managed servers using this engine before removing a version.');
     return installer.uninstall(engineId, tag);
   });
-  handle('engines:setActive', (engineId, tag) => registry.setActiveVersion(engineId, tag));
+  handle('engines:setActive', (engineId, tag) => {
+    const st = registry.state(engineId);
+    if (st.customPath) throw new Error('Clear the custom executable override before activating an installed version.');
+    const version = st.versions.find(v => v.tag === tag);
+    if (!version) throw new Error('Requested version is not installed.');
+    require('./engines/adapters').createAdapter(registry.descriptor(engineId), { activeVersionDir: version.dir }).executablePath();
+    return registry.setActiveVersion(engineId, tag);
+  });
   handle('engines:setCustomPath', (engineId, p) => registry.setCustomPath(engineId, p));
   handle('engines:updateSettings', (engineId, s) => registry.updateSettings(engineId, s));
   handle('engines:paramSchema', () => PARAM_SCHEMA);
