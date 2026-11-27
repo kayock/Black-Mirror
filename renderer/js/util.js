@@ -24,6 +24,7 @@ const BMUtil = {
   el(tag, attrs = {}, children = []) {
     const e = document.createElement(tag);
     for (const [k, v] of Object.entries(attrs)) {
+      if (v == null || v === false) continue;
       if (k === 'class') e.className = v;
       else if (k === 'text') e.textContent = v;
       else if (k.startsWith('on')) e.addEventListener(k.slice(2), v);
