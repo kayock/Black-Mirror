@@ -54,6 +54,7 @@ class CompatibilityLab {
   }
 
   staleReason(entry, current) {
+    if (current !== entry && !require('node:util').isDeepStrictEqual(entry.profileParams || {}, current.params || {})) return 'inference parameters changed';
     if (entry.appVersion !== this.appVersion) return `app version changed (${entry.appVersion} → ${this.appVersion})`;
     if (Number(entry.modelMtimeMs) !== Number(current.modelMtimeMs)) return 'model file changed on disk';
     if ((entry.engineTag || null) !== (current.engineTag || null)) return `engine version changed (${entry.engineTag || 'none'} → ${current.engineTag || 'none'})`;
@@ -143,7 +144,7 @@ class CompatibilityLab {
           modelPath: d.family === 'llama.cpp' ? cfg.modelPath : undefined,
           port: cfg.port,
           bind: '127.0.0.1',
-          params: { ...(cfg.params || {}), contextLength: Math.min((cfg.params && cfg.params.contextLength) || 2048, 2048) },
+          params: { ...(cfg.params || {}) },
           modelDisplayName: cfg.modelDisplayName || 'lab-test'
         });
         measured.loadMs = Date.now() - t0;
