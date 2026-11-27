@@ -98,22 +98,24 @@ function isAlive(pid) {
 function verifyOwnership(record, snapshot) {
   if (!record) return { owned: false, reason: 'no ownership record' };
   if (!snapshot) return { owned: false, reason: `pid ${record.pid} not running` };
-  if (record.startTime && snapshot.startTime && String(record.startTime) !== String(snapshot.startTime)) {
+  if (!record.startTime || !snapshot.startTime || !record.exePath || !snapshot.exe) return { owned: false, reason: 'required process identity evidence missing' };
+  if (String(record.startTime) !== String(snapshot.startTime)) {
     return { owned: false, reason: 'start time mismatch — PID was likely reused by another process' };
   }
   if (record.exePath && snapshot.exe) {
     const a = String(record.exePath).toLowerCase();
     const b = String(snapshot.exe).toLowerCase();
-    if (a !== b && !b.endsWith(a.split(/[\\/]/).pop())) {
+    if (a !== b) {
       return { owned: false, reason: `executable mismatch: expected ${record.exePath}, found ${snapshot.exe}` };
     }
   } else if (record.exePath && !snapshot.exe) {
     return { owned: false, reason: 'executable path unreadable — cannot verify identity' };
   }
   if (record.modelPath) {
-    const inCmd = snapshot.cmdline.some(c => c.includes(record.modelPath));
+    const inCmd = snapshot.cmdline.some(c => c === record.modelPath);
     if (!inCmd) return { owned: false, reason: 'recorded model path not present in command line' };
   }
+  if (!record.modelPath && (!Array.isArray(record.cmdline) || !require('node:util').isDeepStrictEqual(record.cmdline, snapshot.cmdline))) return { owned: false, reason: 'command-line fingerprint missing or different' };
   return { owned: true, reason: 'executable, command line and start time match the ownership record' };
 }
 
