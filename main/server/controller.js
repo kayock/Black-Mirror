@@ -491,7 +491,8 @@ class ServerController {
       this._saveOwnership();
       this.logger.info('controller', `stop confirmed pid=${pid} (port ${p.port} released, endpoint silent)`);
     } else {
-      p.status = result.pidAliveAfter ? 'running' : 'stopped';
+      p.status = 'degraded';
+      this._saveOwnership();
       this.logger.warn('controller', `stop UNRESOLVED for pid=${pid}: exit=${result.exitObserved} alive=${result.pidAliveAfter} portReleased=${result.portReleased} httpDown=${result.httpDown}`);
     }
     return result;
