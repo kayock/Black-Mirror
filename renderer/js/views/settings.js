@@ -29,7 +29,7 @@ const SettingsView = (() => {
     } });
     box.appendChild(BMUtil.el('div', { class: 'settings-row' }, [
       BMUtil.el('span', { text: 'Default network binding' }), bindSel,
-      BMUtil.el('span', { class: 'hint', text: '127.0.0.1 keeps the OpenAI-compatible API private. 0.0.0.0 lets other devices on your network use your models — there is no authentication, so use this only on trusted networks. Existing running servers keep their current binding until restarted.' })
+      BMUtil.el('span', { class: 'hint', text: '127.0.0.1 keeps the OpenAI-compatible API private. 0.0.0.0 lets other devices on your network use your models — there is no authentication, so use this only on trusted networks. Existing servers retain their original binding on restart; choose the desired binding when launching a replacement.' })
     ]));
     box.appendChild(BMUtil.el('div', { class: 'settings-row' }, [
       BMUtil.el('span', { text: 'Default API port' }), portInput,
