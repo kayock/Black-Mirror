@@ -176,7 +176,7 @@ class EngineInstaller {
     const resolved = await this.resolveTag(d, tag);
     const resolvedTag = resolved.tag;
     const existing = this.registry.state(engineId).versions.find(v => v.tag === resolvedTag);
-    if (existing && !d.install.url) {
+    if (existing && !d.install.url && fs.existsSync(existing.dir)) {
       if (this.logger) this.logger.info('installer', `${engineId} ${resolvedTag} already installed`);
       return { tag: resolvedTag, via: resolved.via, dir: existing.dir, alreadyInstalled: true };
     }
@@ -220,12 +220,13 @@ class EngineInstaller {
       if (backup) fs.renameSync(finalDir, backup);
       try {
         if (staging !== finalDir) fs.renameSync(staging, finalDir);
+        this.registry.registerVersion(engineId, finalTag, finalDir, { activate: true });
       } catch (e) {
-        if (backup && !fs.existsSync(finalDir)) fs.renameSync(backup, finalDir);
+        if (fs.existsSync(finalDir)) fs.renameSync(finalDir, `${finalDir}.failed-${Date.now()}`);
+        if (backup) fs.renameSync(backup, finalDir);
         throw e;
       }
       // Leave other version directories untouched.
-      this.registry.registerVersion(engineId, finalTag, finalDir, { activate: true });
       if (this.logger) this.logger.info('installer', `${engineId} ${finalTag} installed+validated at ${finalDir} (tag via ${resolved.via}, asset via ${asset.via})`);
       return { tag: finalTag, dir: finalDir, via: { tag: resolved.via, asset: asset.via }, alreadyInstalled: false, validated: true };
     } else if (d.install.type === 'download-run-installer') {
@@ -301,7 +302,7 @@ class EngineInstaller {
     if (!serverBinary) return { ok: true };
     const exe = path.join(stagingDir, serverBinary + (isWindows() ? '.exe' : ''));
     const found = [exe, path.join(stagingDir, 'build', 'bin', serverBinary + (isWindows() ? '.exe' : ''))]
-      .find(p => fs.existsSync(p));
+      .find(p => fs.existsSync(p) && fs.statSync(p).isFile() && fs.statSync(p).size > 0);
     if (!found) {
       throw new EngineError(
         `Staged ${descriptor.id} archive does not contain the expected ${serverBinary}${isWindows() ? '.exe' : ''} binary — wrong asset, wrong architecture, or corrupted archive. Nothing was installed; your previous version is untouched.`,
