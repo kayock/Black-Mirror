@@ -47,6 +47,8 @@ class ServerController {
     this.readyTimeoutMs = opts.readyTimeoutMs || 180000;
     this.fetchImpl = opts.fetchImpl || ((...a) => fetch(...a));
     this._nextId = 1;
+    this._pendingPorts = new Set();
+    this._pendingModels = new Set();
     // Ownership records: identity evidence for every process we spawn, so a
     // crashed/restarted app can re-verify ownership instead of trusting PIDs.
     this._ownershipStore = new JsonStore(path.join(opts.dataDir || '.', 'managed-processes.json'), { records: [] });
@@ -69,10 +71,10 @@ class ServerController {
         .filter(p => p.pid && p.status !== 'stopped')
         .map(p => ({
           id: p.id, pid: p.pid, engineId: p.engineId, model: p.model,
-          modelPath: p.modelPath || null, port: p.port, bind: p.bind,
+          modelPath: p.modelPath || null, port: p.port, bind: p.bind, models: p.models,
           startedAt: p.startedAt, exePath: p.exePath || null,
           params: p.params, displayName: p.displayName, family: p.family, readyUrl: p.readyUrl,
-          startTime: p.startTime || null
+          startTime: p.startTime || null, cmdline: p.cmdline || null
         }));
       this._ownershipStore.save();
     } catch (e) { this.logger.warn('controller', `Ownership registry save failed: ${e.message}`); }
@@ -100,7 +102,7 @@ class ServerController {
           id: rec.id, pid: rec.pid, engineId: rec.engineId, model: rec.model,
           family: rec.family || null, displayName: rec.displayName || (rec.model ? path.win32.basename(String(rec.model)) : rec.engineId),
           port: rec.port, bind: rec.bind, params: rec.params || null, startedAt: rec.startedAt,
-          pidRecovered: true, exePath: rec.exePath, startTime: rec.startTime,
+          pidRecovered: true, exePath: rec.exePath, startTime: rec.startTime, cmdline: rec.cmdline, modelPath: rec.modelPath, models: rec.models,
           proc: null, logs: [], status: 'running', logFile: null,
           readyUrl: rec.readyUrl || (rec.port ? `http://127.0.0.1:${rec.port}/health` : null), adapter: 'openai'
         };
@@ -211,7 +213,7 @@ class ServerController {
     return {
       id: p.id, pid: p.pid, engineId: p.engineId, model: modelPath,
       displayName,
-      params: p.params || {},
+      params: p.params || {}, models: p.models || [],
       port: p.port, bind: p.bind, startedAt: p.startedAt,
       status: p.status, mode: 'managed',
       family: p.family || null,
@@ -249,6 +251,18 @@ class ServerController {
    * without a readiness probe).
    */
   async start(opts) {
+    const key = `${opts.engineId}:${opts.modelPath || opts.modelName}`;
+    const port = Number(opts.port);
+    if (!Number.isInteger(port) || port < 1 || port > 65535) throw new EngineError('Invalid API port', 'config');
+    if (opts.bind && !['127.0.0.1', '0.0.0.0'].includes(opts.bind)) throw new EngineError('Invalid network binding', 'config');
+    if (this._pendingPorts.has(port) || this._pendingModels.has(key)) throw new EngineError('A conflicting launch is already pending', 'port-busy');
+    this._pendingPorts.add(port);
+    this._pendingModels.add(key);
+    try { return await this._start({ ...opts, port }); }
+    finally { this._pendingPorts.delete(port); this._pendingModels.delete(key); }
+  }
+
+  async _start(opts) {
     const d = this.registry.descriptor(opts.engineId);
     const adapter = this.registry.adapter(opts.engineId);
     const model = opts.modelPath || opts.modelName;
@@ -311,7 +325,9 @@ class ServerController {
     p.startedAt = Date.now();
     p.modelPath = model;
     p.exePath = exe;
-    p.startTime = ownership.snapshotProcess(proc.pid)?.startTime || null; // PID-reuse guard
+    const identity = ownership.snapshotProcess(proc.pid);
+    p.startTime = identity?.startTime || null;
+    p.cmdline = identity?.cmdline || null;
     this._saveOwnership();
     this.logger.info('controller', `started pid=${proc.pid} engine=${d.id} model=${model} port=${opts.port}`, { args });
 
@@ -358,7 +374,12 @@ class ServerController {
       try {
         const res = await this.fetchImpl(p.readyUrl, { signal: AbortSignal.timeout(2000) });
         if (res.ok) {
+          try {
+            const discovery = await this.fetchImpl(`http://127.0.0.1:${p.port}/v1/models`, { signal: AbortSignal.timeout(8000) });
+            if (discovery.ok) { const data = await discovery.json(); p.models = (data.data || data.models || []).map(m => m.id || m.name).filter(Boolean); }
+          } catch (e) { this.logger.warn('controller', `Model discovery failed: ${e.message}`); }
           p.status = 'running';
+          this._saveOwnership();
           this._emit('server-ready', { id: p.id, pid: p.pid, port: p.port });
           this.logger.info('controller', `server ${p.id} ready on port ${p.port}`);
           return this._public(p);
@@ -387,6 +408,11 @@ class ServerController {
     if (!p) throw new EngineError(`No managed server "${idOrKey}"`, 'not-found');
     if (p.mode === 'remote') throw new EngineError('Remote endpoints are never stopped by Black Mirror', 'not-owned');
 
+    if (p.status === 'stopping') throw new EngineError('Stop already in progress', 'busy');
+    if (p.pidRecovered && ownership.isAlive(p.pid)) {
+      const verdict = ownership.verifyOwnership(p, ownership.snapshotProcess(p.pid));
+      if (!verdict.owned) throw new EngineError(`Stop refused: ${verdict.reason}`, 'not-owned');
+    }
     p.status = 'stopping';
     const pid = p.pid;
     const result = { id: p.id, pid, killed: false, exitObserved: false, pidAliveAfter: null, portReleased: null, httpDown: null, confirmed: false };
