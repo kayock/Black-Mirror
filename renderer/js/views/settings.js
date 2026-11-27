@@ -29,13 +29,17 @@ const SettingsView = (() => {
     } });
     box.appendChild(BMUtil.el('div', { class: 'settings-row' }, [
       BMUtil.el('span', { text: 'Default network binding' }), bindSel,
-      BMUtil.el('span', { class: 'hint', text: '127.0.0.1 keeps the OpenAI-compatible API private. 0.0.0.0 lets other devices on your network use your models — there is no authentication, so use this only on trusted networks. Existing running servers keep their current binding until restarted.' })
+      BMUtil.el('span', { class: 'hint', text: '127.0.0.1 keeps the OpenAI-compatible API private. 0.0.0.0 lets other devices on your network use your models — there is no authentication, so use this only on trusted networks. Existing servers retain their original binding on restart; choose the desired binding when launching a replacement.' })
     ]));
     box.appendChild(BMUtil.el('div', { class: 'settings-row' }, [
       BMUtil.el('span', { text: 'Default API port' }), portInput,
       BMUtil.el('span', { class: 'hint', text: 'llama.cpp builds default to 8081/8082/8083 per engine; Ollama uses 11434 and Lemonade 8000. Ports in use are detected before launch.' })
     ]));
     box.appendChild(save);
+    const persist = BMUtil.el('input', { type: 'checkbox' });
+    persist.checked = state.config.lifecycle?.keepServersOnExit === true;
+    box.appendChild(BMUtil.el('label', { class: 'check' }, [persist, BMUtil.el('span', { text: 'Keep eligible managed servers running after closing Black Mirror (applies to new launches)' })]));
+    persist.addEventListener('change', async () => { await window.Bridge.setConfig('lifecycle.keepServersOnExit', persist.checked); toast('Server exit preference saved', 'ok'); });
   }
 
   function renderParams() {
@@ -48,6 +52,7 @@ const SettingsView = (() => {
       let input;
       if (f.type === 'enum') input = BMUtil.el('select', {}, f.options.map(o => BMUtil.el('option', { value: o, text: o, selected: o === val ? '' : null })));
       else if (f.type === 'bool') { input = BMUtil.el('input', { type: 'checkbox' }); input.checked = !!val; }
+      else if (f.type === 'string' || f.type === 'path') input = BMUtil.el('input', { type: 'text', value: val || '' });
       else input = BMUtil.el('input', { type: 'number', min: f.min, max: f.max, step: f.step || 1, value: val });
       inputs[f.id] = input;
       grid.appendChild(BMUtil.el('label', {}, [BMUtil.el('span', { text: f.label }), input]));
@@ -84,7 +89,7 @@ const SettingsView = (() => {
       BMUtil.el('span', { text: 'Diagnostic log level' }), sel,
       BMUtil.el('span', { class: 'hint', text: `Logs are written under the Black Mirror data directory (logs/blackmirror-*.log). App version ${window.Bridge.versions.app} · Electron ${window.Bridge.versions.electron || 'n/a'}` })
     ]));
-    box.appendChild(BMUtil.el('button', { class: 'btn btn-ghost btn-sm', text: 'Open data folder', onclick: () => toast('Data folder: %APPDATA%\\BlackMirror', 'ok') }));
+    box.appendChild(BMUtil.el('button', { class: 'btn btn-ghost btn-sm', text: 'Open data folder', onclick: async () => { const error = await window.Bridge.openDataFolder(); if (error) toast(error, 'err'); } }));
     box.appendChild(BMUtil.el('button', { class: 'btn btn-ghost btn-sm', style: 'margin-left:8px', text: 'Save log level', onclick: async () => {
       await window.Bridge.setConfig('logging.level', sel.value);
       toast('Log level saved (applies on next start)', 'ok');
@@ -126,7 +131,7 @@ function uiPrompt(title, { placeholder = '', value = '', hint = '' } = {}) {
     const input = BMUtil.el('input', { type: 'text', placeholder, 'aria-label': title });
     input.value = value || '';
     const done = (result) => { closeModal(); resolve(result); };
-    const submit = () => done(input.value.trim() || null);
+    const submit = () => done(input.value.trim());
     m.appendChild(BMUtil.el('div', { class: 'settings-row' }, [
       input,
       hint ? BMUtil.el('span', { class: 'hint', text: hint }) : null

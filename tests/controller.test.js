@@ -109,6 +109,35 @@ describe('Server controller', () => {
     fs.rmSync(dir, { recursive: true, force: true });
   });
 
+  test('opt-in persistent process survives release and is recovered without changing params', async () => {
+    const { dir, ctl, logger } = makeController('persistent', { persistent: () => true });
+    const port = await freePort();
+    const model = '/m/persistent.gguf';
+    const originalAdapter = ctl.registry.adapter;
+    ctl.registry.adapter = (...args) => {
+      const adapter = originalAdapter(...args);
+      const build = adapter.buildServerArgs;
+      adapter.buildServerArgs = (m, p, n) => [...build(m, p, n), '--model', m];
+      return adapter;
+    };
+    let started;
+    let recovered;
+    try {
+      started = await ctl.start({ engineId: 'x', modelPath: model, port, bind: '127.0.0.1', params: { contextLength: 16384 } });
+      await ctl.releaseForExit();
+      assert.equal((await fetch(started.baseUrl + '/health')).status, 200);
+      recovered = new ServerController(ctl.registry, logger, { dataDir: dir });
+      assert.equal(recovered.recoverAtStartup().adopted.length, 1);
+      const server = recovered.list().find(p => p.id === started.id);
+      assert.equal(server.pid, started.pid);
+      assert.equal(server.params.contextLength, 16384);
+      assert.equal((await recovered.stop(started.id)).confirmed, true);
+    } finally {
+      if (started && ctl.processes.has(started.id)) await ctl.stop(started.id).catch(() => {});
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
   test('port conflict with an external application fails fast with clear error', async () => {
     const { dir, ctl } = makeController('portconflict');
     const port = await freePort();

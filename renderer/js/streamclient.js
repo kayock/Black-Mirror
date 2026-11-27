@@ -53,7 +53,7 @@ class StreamClient {
       body.reasoning_budget = 0;
     }
 
-    const res = await fetchImpl(`${opts.baseUrl}/v1/chat/completions`, {
+    const res = await fetchImpl(`${opts.baseUrl.replace(/\/+$/, '').replace(/\/v1$/i, '')}/v1/chat/completions`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(body),
@@ -69,7 +69,34 @@ class StreamClient {
 
     // <think> tag state (some models emit raw DeepSeek-style tags)
     let inThink = false;
-    let sawThinkClose = false;
+    let tagTail = '';
+    const emitText = (value) => {
+      if (!value) return;
+      if (firstTokenAt === null) firstTokenAt = Date.now();
+      if (inThink) { reasoning += value; if (opts.onReasoning) opts.onReasoning(value); }
+      else { content += value; if (opts.onDelta) opts.onDelta(value); }
+    };
+    const parseText = (value, flush = false) => {
+      let text = tagTail + value;
+      tagTail = '';
+      while (text.length) {
+        const tag = inThink ? '</think>' : '<think>';
+        const i = text.indexOf(tag);
+        if (i >= 0) {
+          emitText(text.slice(0, i));
+          inThink = !inThink;
+          text = text.slice(i + tag.length);
+          continue;
+        }
+        let keep = 0;
+        if (!flush) for (let n = 1; n < tag.length && n <= text.length; n++) {
+          if (text.endsWith(tag.slice(0, n))) keep = n;
+        }
+        emitText(keep ? text.slice(0, -keep) : text);
+        tagTail = keep ? text.slice(-keep) : '';
+        break;
+      }
+    };
 
     const reader = res.body.getReader();
     const decoder = new TextDecoder();
@@ -91,6 +118,7 @@ class StreamClient {
           if (j.usage) usage = normalizeUsage(j.usage);
           if (j.error) throw new Error(j.error.message || 'engine error');
           const choice = (j.choices && j.choices[0]) || {};
+          if (choice.finish_reason) serverDone = true;
           const delta = choice.delta || {};
           // reasoning channel: llama.cpp deepseek format / ollama
           const rChunk = delta.reasoning_content !== undefined ? delta.reasoning_content
@@ -101,41 +129,7 @@ class StreamClient {
             if (opts.onReasoning) opts.onReasoning(rChunk);
           }
           if (typeof delta.content === 'string' && delta.content.length) {
-            let text = delta.content;
-            // strip <think>…</think> when the engine didn't separate it
-            while (text.length) {
-              if (inThink) {
-                const close = text.indexOf('</think>');
-                if (close >= 0) {
-                  inThink = false; sawThinkClose = true;
-                  const seg = text.slice(0, close);
-                  if (seg) {
-                    if (firstTokenAt === null) firstTokenAt = Date.now();
-                    reasoning += seg; if (opts.onReasoning) opts.onReasoning(seg);
-                  }
-                  text = text.slice(close + 8);
-                }
-                else {
-                  if (firstTokenAt === null) firstTokenAt = Date.now();
-                  reasoning += text; if (opts.onReasoning) opts.onReasoning(text); text = '';
-                }
-              } else {
-                const open = text.indexOf('<think>');
-                if (open >= 0) {
-                  if (open > 0) {
-                    if (firstTokenAt === null) firstTokenAt = Date.now();
-                    content += text.slice(0, open); if (opts.onDelta) opts.onDelta(text.slice(0, open));
-                  }
-                  inThink = true;
-                  text = text.slice(open + 7);
-                } else {
-                  content += text;
-                  if (firstTokenAt === null) firstTokenAt = Date.now();
-                  if (opts.onDelta) opts.onDelta(text);
-                  text = '';
-                }
-              }
-            }
+            parseText(delta.content);
           }
         }
       }
@@ -144,6 +138,7 @@ class StreamClient {
       else if (e && (e.name === 'AbortError')) stopped = true;
       else throw e;
     } finally {
+      parseText('', true);
       // A callback or transport error must not leave a live HTTP stream behind.
       if (!serverDone) {
         try { await reader.cancel(); } catch (_) { /* already closed/aborted */ }
@@ -179,10 +174,12 @@ class StreamClient {
   /** Non-streaming helper (benchmarks, connection tests). */
   static async complete(opts) {
     const fetchImpl = opts.fetchImpl || (typeof fetch !== 'undefined' ? fetch : null);
-    const res = await fetchImpl(`${opts.baseUrl}/v1/chat/completions`, {
+    const thinking = opts.thinking || (opts.params && opts.params.thinkingMode) || 'auto';
+    const thinkingOverrides = thinking === 'off' ? { think: false, chat_template_kwargs: { enable_thinking: false }, reasoning_budget: 0 } : thinking === 'on' ? { think: true, chat_template_kwargs: { enable_thinking: true } } : {};
+    const res = await fetchImpl(`${opts.baseUrl.replace(/\/+$/, '').replace(/\/v1$/i, '')}/v1/chat/completions`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ model: opts.model || 'default', messages: opts.messages || [], stream: false, ...buildSampling(opts.params) }),
+      body: JSON.stringify({ model: opts.model || 'default', messages: opts.messages || [], stream: false, ...buildSampling(opts.params), ...thinkingOverrides }),
       signal: opts.signal
     });
     if (!res.ok) throw new Error(`Request failed: HTTP ${res.status}`);

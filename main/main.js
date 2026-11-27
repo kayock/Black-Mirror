@@ -47,10 +47,10 @@ function dataDir() {
 function initCore() {
   const dd = dataDir();
   fs.mkdirSync(dd, { recursive: true });
-  logger = new Logger(path.join(dd, 'logs'), process.env.BLACK_MIRROR_LOG_LEVEL || 'info');
+  config = new Config(dd);
+  logger = new Logger(path.join(dd, 'logs'), process.env.BLACK_MIRROR_LOG_LEVEL || config.get('logging.level', 'info'));
   logger.info('app', `Black Mirror starting; data dir ${dd}`);
   bus = new Emitter();
-  config = new Config(dd);
   conversations = new Conversations(dd, logger);
   library = new ModelLibrary(dd, logger);
   registry = new EngineRegistry(dd, logger);
@@ -59,11 +59,12 @@ function initCore() {
   });
   controller = new ServerController(registry, logger, {
     dataDir: dd,
+    persistent: () => config.get('lifecycle.keepServersOnExit', false) === true,
     onEvent: e => {
       send('server-event', e);
       // Live log stream uses its own channel (Servers view subscribes to it).
       if (e.event === 'server-log') send('server-log', e);
-      if (e.event === 'server-ready') send('server-state', controller.list());
+      if (['server-ready', 'remote-status', 'remote-removed', 'server-state-changed'].includes(e.event)) send('server-state', controller.list());
       if (e.event === 'server-exit') setTimeout(() => send('server-state', controller.list()), 100);
     }
   });
@@ -149,6 +150,7 @@ function registerIpc() {
 
   // ---- config ----
   handle('config:get', () => config.data);
+  handle('config:openDataFolder', () => shell.openPath(dataDir()));
   handle('config:set', (path, value) => config.set(path, value));
   handle('config:setParams', patch => config.setParams(patch));
 
@@ -187,9 +189,22 @@ function registerIpc() {
     const st = (await registry.status()).find(s => s.id === engineId);
     return st ? (st.probedCapabilities || { probed: false, note: st.error || 'not probeable' }) : null;
   });
-  handle('engines:install', engineId => installer.install(engineId));
-  handle('engines:uninstall', (engineId, tag) => installer.uninstall(engineId, tag));
-  handle('engines:setActive', (engineId, tag) => registry.setActiveVersion(engineId, tag));
+  handle('engines:install', (engineId, tag) => {
+    if (controller.list().some(p => p.mode === 'managed' && p.engineId === engineId && !['stopped','crashed'].includes(p.status))) throw new Error('Stop managed servers using this engine before installing another version.');
+    return installer.install(engineId, { tag });
+  });
+  handle('engines:uninstall', (engineId, tag) => {
+    if (controller.list().some(p => p.mode === 'managed' && p.engineId === engineId && !['stopped','crashed'].includes(p.status))) throw new Error('Stop the managed servers using this engine before removing a version.');
+    return installer.uninstall(engineId, tag);
+  });
+  handle('engines:setActive', (engineId, tag) => {
+    const st = registry.state(engineId);
+    if (st.customPath) throw new Error('Clear the custom executable override before activating an installed version.');
+    const version = st.versions.find(v => v.tag === tag);
+    if (!version) throw new Error('Requested version is not installed.');
+    require('./engines/adapters').createAdapter(registry.descriptor(engineId), { activeVersionDir: version.dir }).executablePath();
+    return registry.setActiveVersion(engineId, tag);
+  });
   handle('engines:setCustomPath', (engineId, p) => registry.setCustomPath(engineId, p));
   handle('engines:updateSettings', (engineId, s) => registry.updateSettings(engineId, s));
   handle('engines:paramSchema', () => PARAM_SCHEMA);
@@ -204,24 +219,23 @@ function registerIpc() {
     return p;
   });
   handle('servers:stop', id => controller.stop(id));
-  handle('servers:restart', id => controller.restart(id));
-  handle('servers:logs', id => {
-    const p = controller._resolve(id);
-    return p ? p.logs.slice(-400) : [];
-  });
+  handle('servers:restart', (id, changes) => controller.restart(id, changes));
+  handle('servers:logs', id => controller.getLogs(id));
   // Remote / external endpoints: connect-only, never owned or stopped.
   handle('servers:addRemote', opts => controller.addRemote(opts));
   handle('servers:removeRemote', id => controller.removeRemote(id));
   handle('servers:testRemote', idOrUrl => controller.testRemote(idOrUrl));
   // Engine-registry model listing (Ollama / Lemonade manage their own models).
-  handle('servers:engineModels', async engineId => {
+  handle('servers:engineModels', async (engineId, network) => {
     const d = registry.descriptor(engineId);
     const st = (await registry.status()).find(s => s.id === engineId);
     if (!st || st.status !== 'available') throw new Error(`Engine ${engineId} is not available: ${st ? st.error : 'unknown'}`);
     const a = registry.adapter(engineId);
     if (!a.listModels) throw new Error(`Engine ${engineId} does not expose a model registry`);
-    const port = (st.settings && st.settings.port) || d.defaultPort;
-    const bind = (st.settings && st.settings.bind) || d.defaultBind || '127.0.0.1';
+    const port = network?.port ?? ((st.settings && st.settings.port) || d.defaultPort);
+    if (!Number.isInteger(port) || port < 1 || port > 65535) throw new Error('Invalid model discovery port');
+    const bind = network?.bind || (st.settings && st.settings.bind) || d.defaultBind || '127.0.0.1';
+    if (!['127.0.0.1', '0.0.0.0'].includes(bind)) throw new Error('Invalid model discovery binding');
     return a.listModels(`http://${bind === '0.0.0.0' ? '127.0.0.1' : bind}:${port}`, fetch);
   });
 
@@ -325,8 +339,12 @@ function registerAppLifecycle() {
     shuttingDown = true;
     event.preventDefault();
     try {
-      logger.info('app', 'shutdown: stopping managed servers');
-      await controller.stopAll('app-shutdown');
+      if (config.get('lifecycle.keepServersOnExit', false) === true) {
+        await controller.releaseForExit();
+      } else {
+        logger.info('app', 'shutdown: stopping managed servers');
+        await controller.stopAll('app-shutdown');
+      }
       monitor.stop();
       logger.close();
     } catch (e) {

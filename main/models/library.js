@@ -152,14 +152,7 @@ class ModelLibrary {
     for (const p of Object.keys(this.data.models)) {
       if (!paths.has(p)) delete this.data.models[p];
     }
-    // Prune dangling favorites / categories / profiles.
-    this.data.favorites = this.data.favorites.filter(p => paths.has(p));
-    for (const cat of Object.keys(this.data.categories)) {
-      this.data.categories[cat] = this.data.categories[cat].filter(p => paths.has(p));
-    }
-    for (const p of Object.keys(this.data.profiles)) {
-      if (!paths.has(p)) delete this.data.profiles[p];
-    }
+    // Preserve user metadata when model storage is temporarily unavailable.
     this.store.save();
     const result = {
       total: Object.keys(this.data.models).length,

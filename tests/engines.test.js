@@ -206,14 +206,14 @@ describe('Engine installer (mock network)', () => {
     // name matching the host platform (llama-server on POSIX, .exe on Windows).
     const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'bm-zip-'));
     const exe = path.join(tmp, 'llama-server.exe');
-    fs.writeFileSync(exe, 'MZfakebinary');
+    const pe = Buffer.alloc(128); pe.writeUInt16LE(0x5a4d, 0); pe.writeUInt32LE(64, 60); pe.writeUInt32LE(0x4550, 64); pe.writeUInt16LE(0x8664, 68); pe.writeUInt16LE(0x20b, 88); fs.writeFileSync(exe, pe);
     fs.writeFileSync(path.join(tmp, 'llama-server'), '#!/bin/sh\nMZfakebinary');
     const zip = path.join(tmp, 'fake.zip');
     const { spawnSync, execSync } = require('child_process');
     if (process.platform === 'win32') {
       const r = spawnSync('powershell.exe', [
         '-NoProfile', '-NonInteractive', '-Command',
-        `Compress-Archive -LiteralPath @('${exe.replace(/'/g, "''")}','${path.join(tmp, 'llama-server').replace(/'/g, "''")}') -DestinationPath '${zip.replace(/'/g, "''")}' -Force`
+        `Add-Type -AssemblyName System.IO.Compression.FileSystem; [System.IO.Compression.ZipFile]::CreateFromDirectory('${tmp.replace(/'/g, "''")}', '${(tmp + '.zip').replace(/'/g, "''")}'); Move-Item -LiteralPath '${(tmp + '.zip').replace(/'/g, "''")}' -Destination '${zip.replace(/'/g, "''")}'`
       ], { windowsHide: true, encoding: 'utf8', timeout: 60000 });
       if (r.status !== 0) throw new Error(`Compress-Archive failed: ${r.stderr || r.stdout || r.status}`);
     } else {
@@ -283,7 +283,7 @@ describe('Engine installer (mock network)', () => {
     assert.equal(reg2.state('llamacpp-vulkan').versions.length, 1);
 
     // uninstall refuses paths outside engines dir
-    reg2.registerVersion('llamacpp-vulkan', 'evil', '/etc', { activate: false });
+    reg2.registerVersion('llamacpp-vulkan', 'evil', zipTmp, { activate: false });
     assert.throws(() => installer.uninstall('llamacpp-vulkan', 'evil'), /Refusing to remove/);
     // uninstall real version works
     installer.uninstall('llamacpp-vulkan', 'b12359');

@@ -4,7 +4,7 @@ const ChatView = (() => {
   const $ = id => document.getElementById(id);
   const state = {
     convs: [], current: null, streaming: false, abort: null,
-    servers: [], attachments: [], convMessages: [], lastPromptTokens: 0
+    servers: [], attachments: [], convMessages: [], lastPromptTokens: 0, selectedServerId: null, selectedModelId: null
   };
 
   async function init() {
@@ -35,7 +35,7 @@ const ChatView = (() => {
 
   async function newConv({ silent } = {}) {
     if (state.streaming) return;
-    const server = state.servers.find(s => s.status === 'running');
+    const server = activeServer();
     const label = serverModelLabel(server);
     state.current = await window.Bridge.chat.create({
       model: label,
@@ -179,7 +179,7 @@ const ChatView = (() => {
   }
 
   function activeServer() {
-    return state.servers.find(s => s.status === 'running' || s.status === 'starting') || null;
+    return state.servers.find(s => s.status === 'running' && s.id === state.selectedServerId) || state.servers.find(s => s.status === 'running') || null;
   }
 
   function editMessage(m) {
@@ -272,7 +272,7 @@ const ChatView = (() => {
 
   function onServerState(servers) {
     state.servers = servers || [];
-    const running = state.servers.find(s => s.status === 'running');
+    const running = activeServer();
     const badge = $('chat-server-badge');
     if (running) {
       badge.className = 'badge badge-on';
@@ -293,9 +293,16 @@ const ChatView = (() => {
 
   function populateModelSelect(server) {
     const sel = $('chat-model-select');
-    const label = serverModelLabel(server) || 'loaded model';
-    sel.innerHTML = `<option>${BMUtil.esc(label)}</option>`;
-    sel.disabled = true;
+    const choices = state.servers.filter(s => s.status === 'running').flatMap(s => (s.models && s.models.length ? s.models : [null]).map(model => ({ s, model })));
+    let index = choices.findIndex(c => c.s.id === state.selectedServerId && c.model === state.selectedModelId);
+    if (index < 0) index = Math.max(0, choices.findIndex(c => c.s.id === server.id));
+    sel.replaceChildren(...choices.map((c, i) => BMUtil.el('option', { value: String(i), text: `${c.model || serverModelLabel(c.s) || 'Undiscovered model'} · ${c.s.displayName || c.s.baseUrl}` })));
+    sel.value = String(index);
+    const choice = choices[index];
+    state.selectedServerId = choice?.s.id || null;
+    state.selectedModelId = choice?.model || null;
+    sel.disabled = choices.length < 2;
+    sel.onchange = () => { const c = choices[Number(sel.value)]; if (!c) return; state.selectedServerId = c.s.id; state.selectedModelId = c.model; onServerState(state.servers); };
   }
 
   async function send() {
@@ -348,7 +355,7 @@ const ChatView = (() => {
     const server = activeServer();
     if (!server || state.streaming) return;
     state.streaming = true;
-    const modelLabel = serverModelLabel(server);
+    const modelLabel = state.selectedModelId || serverModelLabel(server);
     const messages = buildApiMessages();
     // ensure last message is the user turn we just added
     const box = $('chat-messages');
@@ -438,7 +445,7 @@ const ChatView = (() => {
       } else {
         result = await StreamClient.chat({
           baseUrl: server.baseUrl,
-          model: modelLabel || 'default',
+          model: state.selectedModelId || (server.mode === 'remote' ? server.models?.[0] : modelLabel) || 'default',
           messages,
           params,
           thinking: thinkingMode,
@@ -458,6 +465,7 @@ const ChatView = (() => {
       if (thinkingMode === 'off' && streamedReasoning) {
         toast('Thinking mode is Off, but this model still emitted reasoning. The backend/template may not honor enable_thinking=false.', 'warn');
       }
+      if (!result.stopped && result.serverDone === false) toast('Stream ended without a completion marker; response may be incomplete.', 'warn');
       const saved = await persist({
         content: streamed || (result.stopped ? '(stopped)' : '(empty response)'),
         reasoning: streamedReasoning || null,
@@ -465,7 +473,7 @@ const ChatView = (() => {
         tps,
         model: modelLabel,
         engineId: server.engineId || null,
-        stopped: result.stopped
+        stopped: result.stopped || result.serverDone === false
       });
       bubble.innerHTML = '';
       const rendered = renderMessage(saved);

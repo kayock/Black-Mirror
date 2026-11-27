@@ -18,6 +18,7 @@ const invoke = async (channel, ...args) => {
 contextBridge.exposeInMainWorld('blackMirror', {
   // config
   getConfig: () => invoke('config:get'),
+  openDataFolder: () => invoke('config:openDataFolder'),
   setConfig: (path, value) => invoke('config:set', path, value),
   setParams: (patch) => invoke('config:setParams', patch),
 
@@ -45,7 +46,7 @@ contextBridge.exposeInMainWorld('blackMirror', {
     status: () => invoke('engines:status'),
     hardware: () => invoke('engines:hardware'),
     capabilities: (id) => invoke('engines:capabilities', id),
-    install: (id) => invoke('engines:install', id),
+    install: (id, tag) => invoke('engines:install', id, tag),
     uninstall: (id, tag) => invoke('engines:uninstall', id, tag),
     setActive: (id, tag) => invoke('engines:setActive', id, tag),
     setCustomPath: (id, p) => invoke('engines:setCustomPath', id, p),
@@ -59,9 +60,9 @@ contextBridge.exposeInMainWorld('blackMirror', {
     external: () => invoke('servers:external'),
     start: (opts) => invoke('servers:start', opts),
     stop: (id) => invoke('servers:stop', id),
-    restart: (id) => invoke('servers:restart', id),
+    restart: (id, changes) => invoke('servers:restart', id, changes),
     logs: (id) => invoke('servers:logs', id),
-    engineModels: (engineId) => invoke('servers:engineModels', engineId),
+    engineModels: (engineId, network) => invoke('servers:engineModels', engineId, network),
     addRemote: (opts) => invoke('servers:addRemote', opts),
     removeRemote: (id) => invoke('servers:removeRemote', id),
     testRemote: (idOrUrl) => invoke('servers:testRemote', idOrUrl)

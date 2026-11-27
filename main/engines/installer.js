@@ -118,35 +118,22 @@ class EngineInstaller {
     if (!res.ok) throw new EngineError(`Download failed (${res.status}) for ${url}`, 'network');
     const total = Number(res.headers.get('content-length') || 0);
     let received = 0;
-    const out = fs.createWriteStream(destFile);
-    const reader = res.body.getReader ? res.body.getReader() : null;
-    await new Promise((resolve, reject) => {
-      const pump = async () => {
-        try {
-          for (;;) {
-            const { done, value } = await reader.read();
-            if (done) break;
-            received += value.length;
-            if (received > this.maxZipBytes) throw new EngineError('Download exceeded size cap', 'size');
-            if (!out.write(Buffer.from(value))) {
-              await new Promise(r => out.once('drain', r));
-            }
-            this.onProgress({ url, received, total, ratio: total ? received / total : null });
-          }
-          out.end(resolve);
-        } catch (e) {
-          out.end();
-          reject(e);
-        }
-      };
-      if (reader) pump();
-      else {
-        // Node 18+ fetch gives a web stream; body is already a ReadableStream.
-        require('stream').Readable.fromWeb(res.body).pipe(out)
-          .on('error', reject)
-          .on('finish', resolve);
-      }
-    });
+    const { Readable, Transform } = require('node:stream');
+    const { pipeline } = require('node:stream/promises');
+    if (!res.body) throw new EngineError('Download has no response body', 'network');
+    const meter = new Transform({ transform: (chunk, encoding, callback) => {
+      received += chunk.length;
+      if (received > this.maxZipBytes) return callback(new EngineError('Download exceeded size cap', 'size'));
+      this.onProgress({ url, received, total, ratio: total ? received / total : null });
+      callback(null, chunk);
+    } });
+    try {
+      await pipeline(Readable.fromWeb(res.body), meter, fs.createWriteStream(destFile));
+      if (total && !res.headers.get('content-encoding') && received !== total) throw new EngineError('Download length mismatch', 'network');
+    } catch (e) {
+      fs.rmSync(destFile, { force: true });
+      throw e;
+    }
     return { bytes: received };
   }
 
@@ -155,12 +142,18 @@ class EngineInstaller {
     fs.mkdirSync(destDir, { recursive: true });
     const isTarGz = archiveFile.toLowerCase().endsWith('.tar.gz') || archiveFile.toLowerCase().endsWith('.tgz');
     if (isWindows() && !isTarGz) {
+      // Windows PowerShell Expand-Archive can skip hidden/dot-prefixed inputs
+      // and report non-terminating errors with exit code zero. Use the ZIP API
+      // with terminating errors and literal, environment-provided paths.
       await new Promise((resolve, reject) => {
         const p = spawn('powershell.exe', [
           '-NoProfile', '-NonInteractive', '-Command',
-          `Expand-Archive -LiteralPath '${archiveFile.replace(/'/g, "''")}' -DestinationPath '${destDir.replace(/'/g, "''")}' -Force`
-        ], { windowsHide: true });
-        p.on('exit', c => c === 0 ? resolve() : reject(new EngineError(`Expand-Archive exited ${c}`, 'extract')));
+          "$ErrorActionPreference = 'Stop'; Add-Type -AssemblyName System.IO.Compression.FileSystem; [System.IO.Compression.ZipFile]::ExtractToDirectory($env:BM_ARCHIVE_FILE, $env:BM_EXTRACT_DIR)"
+        ], { windowsHide: true, env: { ...process.env, BM_ARCHIVE_FILE: path.resolve(archiveFile), BM_EXTRACT_DIR: path.resolve(destDir) } });
+        let errors = '';
+        p.stderr.on('data', chunk => { errors = (errors + chunk).slice(-4096); });
+        p.stdout.resume();
+        p.on('close', c => c === 0 ? resolve() : reject(new EngineError(`ZIP extraction exited ${c}: ${errors}`, 'extract')));
         p.on('error', reject);
       });
     } else if (isTarGz) {
@@ -183,16 +176,16 @@ class EngineInstaller {
     const resolved = await this.resolveTag(d, tag);
     const resolvedTag = resolved.tag;
     const existing = this.registry.state(engineId).versions.find(v => v.tag === resolvedTag);
-    if (existing && !d.install.url) {
+    if (existing && !d.install.url && fs.existsSync(existing.dir)) {
       if (this.logger) this.logger.info('installer', `${engineId} ${resolvedTag} already installed`);
       return { tag: resolvedTag, via: resolved.via, dir: existing.dir, alreadyInstalled: true };
     }
     const dir = path.join(this.registry.enginesDir, engineId, resolvedTag);
-    fs.rmSync(dir, { recursive: true, force: true });
-    fs.mkdirSync(dir, { recursive: true });
+    fs.mkdirSync(path.dirname(dir), { recursive: true });
 
     if (d.install.type === 'github-release-zip') {
-      const asset = await this.resolveAsset(d, resolvedTag, resolved.recentTags || []);
+      const asset = await this.resolveAsset(d, resolvedTag, tag ? [] : (resolved.recentTags || []));
+      if (tag && asset.tag !== tag) throw new EngineError(`Requested version ${tag} is unavailable; refusing substitution`, 'version-unavailable');
       // Disk-space guard: refuse to start a download we cannot finish.
       await this._assertDiskSpace(this.registry.enginesDir, 600 * 1024 * 1024);
       // STAGING: extract into .staging-<tag> and validate BEFORE anything
@@ -223,13 +216,17 @@ class EngineInstaller {
       const finalTag = asset.tag;
       const finalDir = path.join(this.registry.enginesDir, engineId, finalTag);
       const existingFinal = fs.existsSync(finalDir);
-      if (existingFinal) {
-        // Re-install/update: keep the old tree until the new one is in place.
-        fs.renameSync(finalDir, `${finalDir}.old-${Date.now()}`);
+      const backup = existingFinal ? `${finalDir}.old-${Date.now()}` : null;
+      if (backup) fs.renameSync(finalDir, backup);
+      try {
+        if (staging !== finalDir) fs.renameSync(staging, finalDir);
+        this.registry.registerVersion(engineId, finalTag, finalDir, { activate: true });
+      } catch (e) {
+        if (fs.existsSync(finalDir)) fs.renameSync(finalDir, `${finalDir}.failed-${Date.now()}`);
+        if (backup) fs.renameSync(backup, finalDir);
+        throw e;
       }
-      if (staging !== finalDir) fs.renameSync(staging, finalDir);
-      if (finalDir !== dir) fs.rmSync(dir, { recursive: true, force: true });
-      this.registry.registerVersion(engineId, finalTag, finalDir, { activate: true });
+      // Leave other version directories untouched.
       if (this.logger) this.logger.info('installer', `${engineId} ${finalTag} installed+validated at ${finalDir} (tag via ${resolved.via}, asset via ${asset.via})`);
       return { tag: finalTag, dir: finalDir, via: { tag: resolved.via, asset: asset.via }, alreadyInstalled: false, validated: true };
     } else if (d.install.type === 'download-run-installer') {
@@ -297,19 +294,30 @@ class EngineInstaller {
 
   /**
    * Validate a staged engine tree BEFORE activation: the expected server
-   * binary must exist and be executable-looking. Catches wrong-arch assets,
-   * incomplete downloads and failed extractions before anything is replaced.
+   * binary must exist and be nonempty; Windows PE headers must identify x64.
+   * Header validation alone does not prove runtime compatibility.
    */
   _validateStaged(descriptor, stagingDir) {
     const serverBinary = descriptor.serverBinary;
     if (!serverBinary) return { ok: true };
     const exe = path.join(stagingDir, serverBinary + (isWindows() ? '.exe' : ''));
     const found = [exe, path.join(stagingDir, 'build', 'bin', serverBinary + (isWindows() ? '.exe' : ''))]
-      .find(p => fs.existsSync(p));
+      .find(p => fs.existsSync(p) && fs.statSync(p).isFile() && fs.statSync(p).size > 0);
     if (!found) {
       throw new EngineError(
         `Staged ${descriptor.id} archive does not contain the expected ${serverBinary}${isWindows() ? '.exe' : ''} binary — wrong asset, wrong architecture, or corrupted archive. Nothing was installed; your previous version is untouched.`,
         'invalid-archive');
+    }
+    if (isWindows()) {
+      const fd = fs.openSync(found, 'r');
+      try {
+        const dos = Buffer.alloc(64);
+        if (fs.readSync(fd, dos, 0, 64, 0) !== 64 || dos.readUInt16LE(0) !== 0x5a4d) throw new EngineError('Invalid Windows executable header', 'invalid-archive');
+        const offset = dos.readUInt32LE(60);
+        const pe = Buffer.alloc(26);
+        if (offset < 64 || offset + pe.length > fs.fstatSync(fd).size || fs.readSync(fd, pe, 0, pe.length, offset) !== pe.length || pe.readUInt32LE(0) !== 0x4550) throw new EngineError('Invalid Windows PE header', 'invalid-archive');
+        if (pe.readUInt16LE(4) !== 0x8664 || pe.readUInt16LE(24) !== 0x20b) throw new EngineError('Expected an x64 Windows PE32+ executable', 'invalid-archive');
+      } finally { fs.closeSync(fd); }
     }
     return { ok: true, binary: found };
   }
@@ -320,9 +328,14 @@ class EngineInstaller {
     const v = st.versions.find(v => v.tag === tag);
     if (!v) throw new EngineError(`Version ${tag} not installed`, 'not-installed');
     // Safety: only remove inside our engines dir.
-    const base = path.resolve(this.registry.enginesDir);
-    const dir = path.resolve(v.dir);
-    if (!dir.startsWith(base)) {
+    const base = fs.realpathSync(this.registry.enginesDir);
+    const lexical = path.resolve(v.dir);
+    const lexicalRelative = path.relative(path.resolve(this.registry.enginesDir), lexical);
+    if (!lexicalRelative || lexicalRelative === '..' || lexicalRelative.startsWith('..' + path.sep) || path.isAbsolute(lexicalRelative)) throw new EngineError('Refusing to remove a directory outside Black Mirror engines folder', 'safety');
+    if (!fs.existsSync(lexical)) return this.registry.removeVersion(engineId, tag);
+    const dir = fs.realpathSync(lexical);
+    const relative = path.relative(base, dir);
+    if (!relative || relative === '..' || relative.startsWith('..' + path.sep) || path.isAbsolute(relative)) {
       throw new EngineError('Refusing to remove a directory outside Black Mirror engines folder', 'safety');
     }
     fs.rmSync(dir, { recursive: true, force: true });

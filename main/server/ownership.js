@@ -24,7 +24,7 @@ function _procStartTime(pid) {
   if (!stat) return null;
   const close = stat.lastIndexOf(')');
   const fields = stat.slice(close + 2).split(' ');
-  return fields[20] || null; // field 22 overall → index 20 after comm
+  return fields[19] || null; // field 3 is index 0; field 22 is index 19
 }
 
 /** Snapshot a live process's identity. Returns null when it does not exist. */
@@ -98,22 +98,26 @@ function isAlive(pid) {
 function verifyOwnership(record, snapshot) {
   if (!record) return { owned: false, reason: 'no ownership record' };
   if (!snapshot) return { owned: false, reason: `pid ${record.pid} not running` };
-  if (record.startTime && snapshot.startTime && String(record.startTime) !== String(snapshot.startTime)) {
+  if (Number(record.pid) !== Number(snapshot.pid)) return { owned: false, reason: 'PID mismatch' };
+  if (!record.startTime || !snapshot.startTime || !record.exePath || !snapshot.exe) return { owned: false, reason: 'required process identity evidence missing' };
+  if (String(record.startTime) !== String(snapshot.startTime)) {
     return { owned: false, reason: 'start time mismatch — PID was likely reused by another process' };
   }
   if (record.exePath && snapshot.exe) {
-    const a = String(record.exePath).toLowerCase();
-    const b = String(snapshot.exe).toLowerCase();
-    if (a !== b && !b.endsWith(a.split(/[\\/]/).pop())) {
+    const normalize = value => process.platform === 'win32' ? String(value).toLowerCase().replace(/\\/g, '/') : String(value);
+    const a = normalize(record.exePath);
+    const b = normalize(snapshot.exe);
+    if (a !== b) {
       return { owned: false, reason: `executable mismatch: expected ${record.exePath}, found ${snapshot.exe}` };
     }
   } else if (record.exePath && !snapshot.exe) {
     return { owned: false, reason: 'executable path unreadable — cannot verify identity' };
   }
   if (record.modelPath) {
-    const inCmd = snapshot.cmdline.some(c => c.includes(record.modelPath));
+    const inCmd = snapshot.cmdline.some(c => c === record.modelPath);
     if (!inCmd) return { owned: false, reason: 'recorded model path not present in command line' };
   }
+  if (!record.modelPath && (!Array.isArray(record.cmdline) || !require('node:util').isDeepStrictEqual(record.cmdline, snapshot.cmdline))) return { owned: false, reason: 'command-line fingerprint missing or different' };
   return { owned: true, reason: 'executable, command line and start time match the ownership record' };
 }
 

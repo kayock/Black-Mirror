@@ -44,9 +44,12 @@ class ServerController {
     /** key -> {pid, proc, engineId, model, port, bind, startedAt, logs, status, logFile} */
     this.processes = new Map();
     this.onEvent = opts.onEvent || (() => {});
+    this.persistent = opts.persistent || (() => false);
     this.readyTimeoutMs = opts.readyTimeoutMs || 180000;
     this.fetchImpl = opts.fetchImpl || ((...a) => fetch(...a));
     this._nextId = 1;
+    this._pendingPorts = new Set();
+    this._pendingModels = new Set();
     // Ownership records: identity evidence for every process we spawn, so a
     // crashed/restarted app can re-verify ownership instead of trusting PIDs.
     this._ownershipStore = new JsonStore(path.join(opts.dataDir || '.', 'managed-processes.json'), { records: [] });
@@ -69,12 +72,13 @@ class ServerController {
         .filter(p => p.pid && p.status !== 'stopped')
         .map(p => ({
           id: p.id, pid: p.pid, engineId: p.engineId, model: p.model,
-          modelPath: p.modelPath || null, port: p.port, bind: p.bind,
+          modelPath: p.modelPath || null, port: p.port, bind: p.bind, models: p.models,
           startedAt: p.startedAt, exePath: p.exePath || null,
-          startTime: p.startTime || null
+          params: p.params, displayName: p.displayName, family: p.family, readyUrl: p.readyUrl, logFile: p.logFile, persistent: p.persistent === true,
+          startTime: p.startTime || null, cmdline: p.cmdline || null
         }));
       this._ownershipStore.save();
-    } catch (_) { /* non-fatal */ }
+    } catch (e) { this.logger.warn('controller', `Ownership registry save failed: ${e.message}`); }
   }
 
   /**
@@ -97,13 +101,15 @@ class ServerController {
         adopted.push({ ...rec, recoveredStatus: 'running' });
         const p = {
           id: rec.id, pid: rec.pid, engineId: rec.engineId, model: rec.model,
-          family: null, displayName: rec.model ? path.win32.basename(String(rec.model)) : rec.engineId,
-          port: rec.port, bind: rec.bind, params: {}, startedAt: rec.startedAt,
-          pidRecovered: true, exePath: rec.exePath, startTime: rec.startTime,
-          proc: null, logs: [], status: 'running', logFile: null,
-          readyUrl: rec.port ? `http://127.0.0.1:${rec.port}/health` : null, adapter: 'openai'
+          family: rec.family || null, displayName: rec.displayName || (rec.model ? path.win32.basename(String(rec.model)) : rec.engineId),
+          port: rec.port, bind: rec.bind, params: rec.params || null, startedAt: rec.startedAt,
+          pidRecovered: true, exePath: rec.exePath, startTime: rec.startTime, cmdline: rec.cmdline, modelPath: rec.modelPath, models: rec.models,
+          proc: null, logs: [], status: 'running', logFile: rec.logFile || null, persistent: rec.persistent === true,
+          readyUrl: rec.readyUrl || (rec.port ? `http://127.0.0.1:${rec.port}/health` : null), adapter: 'openai'
         };
         this.processes.set(rec.id, p);
+        const recoveredNumber = /^srv-(\d+)$/.exec(rec.id);
+        if (recoveredNumber) this._nextId = Math.max(this._nextId, Number(recoveredNumber[1]) + 1);
       } else {
         external.push({ ...rec, snapshot: { exe: snap.exe, cmdline: snap.cmdline.slice(0, 8) }, reason: verdict.reason });
       }
@@ -140,14 +146,14 @@ class ServerController {
       this._remoteStore.data.nextId = this._nextRemoteId;
       this._remoteStore.data.remotes = [...this.remotes.values()];
       this._remoteStore.save();
-    } catch (_) { /* non-fatal */ }
+    } catch (e) { this.logger.warn('controller', `Remote registry save failed: ${e.message}`); }
   }
 
   /** Remote / external OpenAI-compatible endpoints — CONNECT ONLY, never owned. */
   listRemotes() { return [...this.remotes.values()]; }
 
   addRemote({ label, baseUrl, model }) {
-    const url = String(baseUrl || '').trim().replace(/\/+$/, '');
+    const url = String(baseUrl || '').trim().replace(/\/+$/, '').replace(/\/v1$/i, '');
     if (!/^https?:\/\//i.test(url)) throw new EngineError('Endpoint URL must start with http:// or https://', 'bad-url');
     const id = 'remote-' + (this._nextRemoteId++);
     const rec = { id, label: label || url, baseUrl: url, model: model || null, addedAt: Date.now(), status: 'unknown', mode: 'remote' };
@@ -171,7 +177,7 @@ class ServerController {
     const rec = this.remotes.get(idOrUrl) || { baseUrl: idOrUrl, id: null, label: idOrUrl };
     const started = Date.now();
     try {
-      const res = await this.fetchImpl(`${rec.baseUrl}/v1/models`, { signal: AbortSignal.timeout(8000) });
+      const res = await this.fetchImpl(`${rec.baseUrl.replace(/\/+$/, '').replace(/\/v1$/i, '')}/v1/models`, { signal: AbortSignal.timeout(8000) });
       const ms = Date.now() - started;
       if (!res.ok) {
         if (rec.id) { rec.status = 'unreachable'; rec.lastError = `HTTP ${res.status}`; }
@@ -184,6 +190,8 @@ class ServerController {
     } catch (e) {
       if (rec.id) { rec.status = 'unreachable'; rec.lastError = e.message; }
       return { ok: false, latencyMs: Date.now() - started, error: e.message, models: [] };
+    } finally {
+      if (rec.id) { this._saveRemotes(); this._emit('remote-status', { id: rec.id }); }
     }
   }
 
@@ -191,7 +199,7 @@ class ServerController {
     const managed = [...this.processes.values()].map(p => this._public(p));
     const remote = [...this.remotes.values()].map(r => ({
       id: r.id, engineId: 'remote', model: r.model, displayName: r.label,
-      status: r.status === 'connected' ? 'running' : r.status === 'unreachable' ? 'crashed' : 'unknown',
+      status: r.status === 'connected' ? 'running' : r.status === 'unreachable' ? 'unreachable' : 'unknown',
       mode: 'remote', pid: null, port: null, bind: null, startedAt: r.addedAt,
       baseUrl: r.baseUrl, logLines: 0, models: r.models || null
     }));
@@ -206,13 +214,14 @@ class ServerController {
     return {
       id: p.id, pid: p.pid, engineId: p.engineId, model: modelPath,
       displayName,
-      params: p.params || {},
+      params: p.params || {}, models: p.models || [],
       port: p.port, bind: p.bind, startedAt: p.startedAt,
       status: p.status, mode: 'managed',
       family: p.family || null,
       pidRecovered: !!p.pidRecovered,
       exePath: p.exePath || null,
       baseUrl: `http://${p.bind === '0.0.0.0' ? '127.0.0.1' : p.bind}:${p.port}`,
+      lanUrls: p.bind === '0.0.0.0' ? Object.values(require('os').networkInterfaces()).flat().filter(n => n && !n.internal && (n.family === 'IPv4' || n.family === 4)).map(n => `http://${n.address}:${p.port}/v1`) : [],
       logLines: p.logs.length
     };
   }
@@ -226,6 +235,26 @@ class ServerController {
   }
 
   _emit(event, payload) { this.onEvent({ event, ...payload, ts: Date.now() }); }
+
+  getLogs(id, limit = 400) {
+    const p = this.processes.get(id);
+    if (!p) return [];
+    if (!p.logFile || (!p.persistent && !p.pidRecovered)) return p.logs.slice(-limit);
+    let fd;
+    try {
+      const root = fs.realpathSync(this.logDir);
+      const file = fs.realpathSync(p.logFile);
+      const relative = path.relative(root, file);
+      if (!relative || relative.startsWith('..' + path.sep) || relative === '..' || path.isAbsolute(relative)) return p.logs.slice(-limit);
+      fd = fs.openSync(file, 'r');
+      const size = fs.fstatSync(fd).size;
+      const length = Math.min(size, 256 * 1024);
+      const buf = Buffer.alloc(length);
+      const read = fs.readSync(fd, buf, 0, length, size - length);
+      return buf.subarray(0, read).toString('utf8').split(/\r?\n/).filter(Boolean).slice(-limit);
+    } catch (_) { return p.logs.slice(-limit); }
+    finally { if (fd !== undefined) fs.closeSync(fd); }
+  }
 
   _appendLog(p, stream, line) {
     if (!line) return;
@@ -243,6 +272,18 @@ class ServerController {
    * without a readiness probe).
    */
   async start(opts) {
+    const key = `${opts.engineId}:${opts.modelPath || opts.modelName}`;
+    const port = Number(opts.port);
+    if (!Number.isInteger(port) || port < 1 || port > 65535) throw new EngineError('Invalid API port', 'config');
+    if (opts.bind && !['127.0.0.1', '0.0.0.0'].includes(opts.bind)) throw new EngineError('Invalid network binding', 'config');
+    if (this._pendingPorts.has(port) || this._pendingModels.has(key)) throw new EngineError('A conflicting launch is already pending', 'port-busy');
+    this._pendingPorts.add(port);
+    this._pendingModels.add(key);
+    try { return await this._start({ ...opts, port }); }
+    finally { this._pendingPorts.delete(port); this._pendingModels.delete(key); }
+  }
+
+  async _start(opts) {
     const d = this.registry.descriptor(opts.engineId);
     const adapter = this.registry.adapter(opts.engineId);
     const model = opts.modelPath || opts.modelName;
@@ -269,7 +310,9 @@ class ServerController {
     let exe;
     try { exe = adapter.executablePath(); }
     catch (e) { throw e; }
-    const args = adapter.buildServerArgs(model, opts.params, { port: opts.port, bind: opts.bind || '127.0.0.1' });
+    const network = { port: opts.port, bind: opts.bind || '127.0.0.1' };
+    const launchAdapter = d.family === 'llama.cpp' ? this.registry.adapter(opts.engineId, require('../engines/capabilities').probe(exe)) : adapter;
+    const args = launchAdapter.buildServerArgs(model, opts.params, network);
 
     const id = 'srv-' + (this._nextId++);
     const stamp = new Date().toISOString().replace(/[:.]/g, '-');
@@ -288,27 +331,34 @@ class ServerController {
     this._emit('server-starting', { id, engineId: opts.engineId, model, port: opts.port });
 
     let proc;
+    p.persistent = this.persistent() === true;
+    let logFd;
     try {
+      if (p.persistent) logFd = fs.openSync(logFile, 'a');
       proc = spawn(exe, args, {
+        detached: p.persistent,
         windowsHide: true,
-        stdio: ['ignore', 'pipe', 'pipe'],
-        env: { ...process.env, ...(opts.env || {}) }
+        stdio: p.persistent ? ['ignore', logFd, logFd] : ['ignore', 'pipe', 'pipe'],
+        env: { ...process.env, ...(opts.env || {}), ...(d.family === 'ollama' ? { OLLAMA_HOST: `${network.bind}:${network.port}` } : {}) }
       });
     } catch (e) {
       this.processes.delete(id);
       throw new EngineError(`Failed to spawn ${exe}: ${e.message}`, 'spawn');
-    }
+    } finally { if (logFd !== undefined) fs.closeSync(logFd); }
     p.proc = proc;
     p.pid = proc.pid;
     p.startedAt = Date.now();
-    p.modelPath = model;
+    p.modelPath = d.family === 'llama.cpp' ? model : null;
     p.exePath = exe;
-    p.startTime = ownership.snapshotProcess(proc.pid)?.startTime || null; // PID-reuse guard
+    const identity = ownership.snapshotProcess(proc.pid);
+    p.exePath = identity?.exe || exe;
+    p.startTime = identity?.startTime || null;
+    p.cmdline = identity?.cmdline || null;
     this._saveOwnership();
     this.logger.info('controller', `started pid=${proc.pid} engine=${d.id} model=${model} port=${opts.port}`, { args });
 
-    proc.stdout.on('data', chunk => String(chunk).split(/\r?\n/).forEach(l => this._appendLog(p, 'out', l)));
-    proc.stderr.on('data', chunk => String(chunk).split(/\r?\n/).forEach(l => this._appendLog(p, 'err', l)));
+    proc.stdout?.on('data', chunk => String(chunk).split(/\r?\n/).forEach(l => this._appendLog(p, 'out', l)));
+    proc.stderr?.on('data', chunk => String(chunk).split(/\r?\n/).forEach(l => this._appendLog(p, 'err', l)));
     proc.on('exit', (code, signal) => {
       const wasIntentional = p.status === 'stopping';
       p.status = wasIntentional ? 'stopped' : (code === 0 ? 'stopped' : 'crashed');
@@ -331,7 +381,10 @@ class ServerController {
     if (d.readyProbe && d.readyProbe.type === 'http') {
       const base = `http://127.0.0.1:${opts.port}`;
       p.readyUrl = base + d.readyProbe.path;
-      await this._waitReady(p);
+      try { await this._waitReady(p); } catch (e) {
+        if (e.code === 'ready-timeout' && p.status === 'starting') { p.status = 'degraded'; this._emit('server-state-changed', { id: p.id }); this._saveOwnership(); }
+        throw e;
+      }
     } else {
       p.status = 'running'; // externally managed services without probes
     }
@@ -344,13 +397,18 @@ class ServerController {
     while (Date.now() < deadline) {
       if (p.status === 'crashed' || !p.proc || p.proc.exitCode !== null) {
         throw new EngineError(
-          `Server exited during startup. Last log lines:\n${p.logs.slice(-8).join('\n')}`,
+          `Server exited during startup. Last log lines:\n${this.getLogs(p.id, 8).join('\n')}`,
           'startup-failed');
       }
       try {
         const res = await this.fetchImpl(p.readyUrl, { signal: AbortSignal.timeout(2000) });
         if (res.ok) {
+          try {
+            const discovery = await this.fetchImpl(`http://127.0.0.1:${p.port}/v1/models`, { signal: AbortSignal.timeout(8000) });
+            if (discovery.ok) { const data = await discovery.json(); p.models = (data.data || data.models || []).map(m => m.id || m.name).filter(Boolean); }
+          } catch (e) { this.logger.warn('controller', `Model discovery failed: ${e.message}`); }
           p.status = 'running';
+          this._saveOwnership();
           this._emit('server-ready', { id: p.id, pid: p.pid, port: p.port });
           this.logger.info('controller', `server ${p.id} ready on port ${p.port}`);
           return this._public(p);
@@ -379,6 +437,11 @@ class ServerController {
     if (!p) throw new EngineError(`No managed server "${idOrKey}"`, 'not-found');
     if (p.mode === 'remote') throw new EngineError('Remote endpoints are never stopped by Black Mirror', 'not-owned');
 
+    if (p.status === 'stopping') throw new EngineError('Stop already in progress', 'busy');
+    if (p.pidRecovered && ownership.isAlive(p.pid)) {
+      const verdict = ownership.verifyOwnership(p, ownership.snapshotProcess(p.pid));
+      if (!verdict.owned) throw new EngineError(`Stop refused: ${verdict.reason}`, 'not-owned');
+    }
     p.status = 'stopping';
     const pid = p.pid;
     const result = { id: p.id, pid, killed: false, exitObserved: false, pidAliveAfter: null, portReleased: null, httpDown: null, confirmed: false };
@@ -399,31 +462,17 @@ class ServerController {
         });
         result.killed = result.taskkillExit === 0;
       } else {
-        try { process.kill(pid, 'SIGTERM'); } catch (_) { result.killed = true; /* already gone */ }
-        const gone = await Promise.race([
-          new Promise(resolve => {
-            if (p.proc && (p.proc.exitCode !== null || p.proc.signalCode || p.proc.killed)) return resolve();
-            if (p.proc) p.proc.once('exit', resolve);
-            else { // recovered record without a live child handle: poll liveness
-              const iv = setInterval(() => { if (!ownership.isAlive(pid)) { clearInterval(iv); resolve(); } }, 100);
-              setTimeout(() => { clearInterval(iv); resolve(); }, 10000);
-            }
-          }),
-          sleep(10000)
-        ]);
-        if (!gone) {
-          try { process.kill(pid, 'SIGKILL'); } catch (_) { /* already gone */ }
-          await Promise.race([
-            new Promise(resolve => {
-              if (p.proc && (p.proc.exitCode !== null || p.proc.signalCode)) return resolve();
-              if (p.proc) p.proc.once('exit', resolve);
-              else {
-                const iv = setInterval(() => { if (!ownership.isAlive(pid)) { clearInterval(iv); resolve(); } }, 100);
-                setTimeout(() => { clearInterval(iv); resolve(); }, 5000);
-              }
-            }),
-            sleep(5000)
-          ]);
+        const exited = () => p.proc ? p.proc.exitCode !== null || p.proc.signalCode !== null : !ownership.isAlive(pid);
+        const stillOwned = () => !exited() && (!p.pidRecovered || ownership.verifyOwnership(p, ownership.snapshotProcess(pid)).owned);
+        const waitExit = async ms => {
+          const end = Date.now() + ms;
+          while (!exited() && Date.now() < end) await sleep(100);
+          return exited();
+        };
+        if (stillOwned()) { try { if (p.proc) p.proc.kill('SIGTERM'); else process.kill(pid, 'SIGTERM'); } catch (_) { /* exit race */ } }
+        if (!(await waitExit(10000)) && stillOwned()) {
+          try { if (p.proc) p.proc.kill('SIGKILL'); else process.kill(pid, 'SIGKILL'); } catch (_) { /* exit race */ }
+          await waitExit(5000);
         }
         result.killed = true;
       }
@@ -446,7 +495,7 @@ class ServerController {
     if (p.readyUrl) result.httpDown = !(await this._httpResponding(p.readyUrl));
     else result.httpDown = result.portReleased;
 
-    result.confirmed = result.exitObserved && !result.pidAliveAfter && result.portReleased;
+    result.confirmed = result.exitObserved && !result.pidAliveAfter && result.portReleased && result.httpDown;
     if (result.confirmed) {
       p.status = 'stopped';
       p.endedAt = Date.now();
@@ -454,7 +503,8 @@ class ServerController {
       this._saveOwnership();
       this.logger.info('controller', `stop confirmed pid=${pid} (port ${p.port} released, endpoint silent)`);
     } else {
-      p.status = result.pidAliveAfter ? 'running' : 'stopped';
+      p.status = 'degraded';
+      this._saveOwnership();
       this.logger.warn('controller', `stop UNRESOLVED for pid=${pid}: exit=${result.exitObserved} alive=${result.pidAliveAfter} portReleased=${result.portReleased} httpDown=${result.httpDown}`);
     }
     return result;
@@ -466,18 +516,21 @@ class ServerController {
    * replacement process is spawned — otherwise a duplicate inference server
    * could be left running when termination remains unresolved.
    */
-  async restart(idOrKey) {
+  async restart(idOrKey, changes = {}) {
     const p = this._resolve(idOrKey);
     if (!p) throw new EngineError(`No managed server "${idOrKey}"`, 'not-found');
     if (p.mode === 'remote') throw new EngineError('Remote endpoints are never restarted by Black Mirror', 'not-owned');
+    if (p.pidRecovered && !p.params) throw new EngineError('Original launch parameters unavailable; stop and explicitly configure a new launch instead.', 'config-unavailable');
     const opts = {
       engineId: p.engineId,
       modelPath: p.model,
-      port: p.port,
-      bind: p.bind,
+      port: changes.port ?? p.port,
+      bind: changes.bind ?? p.bind,
       params: p.params,
       modelDisplayName: p.displayName
     };
+    if (!Number.isInteger(opts.port) || opts.port < 1 || opts.port > 65535 || !['127.0.0.1', '0.0.0.0'].includes(opts.bind)) throw new EngineError('Invalid replacement network configuration', 'config');
+    if (opts.port !== p.port && !(await checkPort(opts.port, opts.bind)).free) throw new EngineError('Replacement port is unavailable; original server left running', 'port-busy');
     const stopResult = await this.stop(idOrKey);
     if (!stopResult || stopResult.confirmed !== true) {
       const detail = stopResult
@@ -499,6 +552,19 @@ class ServerController {
    * Graceful shutdown of everything WE started (app quit). Returns per-process
    * outcomes; unresolved terminations stay recorded and are reported.
    */
+  async releaseForExit() {
+    for (const p of [...this.processes.values()]) {
+      const verdict = p.persistent ? ownership.verifyOwnership(p, ownership.snapshotProcess(p.pid)) : null;
+      if (p.persistent && verdict.owned) {
+        if (p.proc) p.proc.unref();
+      } else {
+        if (verdict) this.logger.warn('controller', `Persistence refused for ${p.id}: ${verdict.reason}`);
+        try { await this.stop(p.id); } catch (e) { this.logger.warn('controller', `Shutdown stop failed: ${e.message}`); }
+      }
+    }
+    this._saveOwnership();
+  }
+
   async stopAll(reason = 'app-shutdown') {
     const ids = [...this.processes.keys()];
     this.logger.info('controller', `stopping ${ids.length} managed server(s): ${reason}`);

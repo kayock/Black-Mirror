@@ -43,9 +43,9 @@ const ServersView = (() => {
       if (!url) { toast('Enter an endpoint URL first', 'warn'); return; }
       try {
         const r = await window.Bridge.servers.addRemote({ label: labelInput.value.trim(), baseUrl: url });
-        await window.Bridge.servers.testRemote(r.id);
+        const result = await window.Bridge.servers.testRemote(r.id);
         closeModal();
-        toast('Endpoint connected (read-only ownership)', 'ok');
+        toast(result.ok ? 'Endpoint connected (read-only ownership)' : `Endpoint saved but unreachable: ${result.error}`, result.ok ? 'ok' : 'err');
         reload();
       } catch (e) { toast(e.message, 'err'); }
     });
@@ -92,6 +92,7 @@ const ServersView = (() => {
       running ? BMUtil.el('span', { class: 'server-addr mono', text: s.baseUrl + '/v1', title: 'Copy API endpoint', onclick: () => { navigator.clipboard.writeText(s.baseUrl + '/v1'); toast('Endpoint copied', 'ok'); } }) : null,
       s.startedAt ? BMUtil.el('span', { class: 'dim small', text: `up ${BMUtil.formatDuration((Date.now() - s.startedAt) / 1000)} · pid ${s.pid}` }) : null
     ]);
+    for (const url of (s.lanUrls || [])) head.appendChild(BMUtil.el('button', { class: 'btn btn-ghost btn-sm', text: `Copy LAN: ${url}`, onclick: e => { e.stopPropagation(); navigator.clipboard.writeText(url); } }));
     head.addEventListener('click', () => selectServer(s));
     c.appendChild(head);
 
@@ -118,11 +119,28 @@ const ServersView = (() => {
       c.appendChild(actions);
       return c;
     }
-    act('■ Stop', async () => { try { await window.Bridge.servers.stop(s.id); reload(); toast('Server stopped', 'ok'); } catch (e) { toast(e.message, 'err'); } }, 'btn-danger', !running && s.status !== 'starting');
+    act('■ Stop', async () => { try { const result = await window.Bridge.servers.stop(s.id); reload(); toast(result.confirmed ? 'Server stopped' : 'Stop not confirmed; inspect server logs', result.confirmed ? 'ok' : 'err'); } catch (e) { toast(e.message, 'err'); } }, 'btn-danger', !running && !['starting','degraded'].includes(s.status));
     act('⟳ Restart', async () => { try { await window.Bridge.servers.restart(s.id); reload(); toast('Restarted', 'ok'); } catch (e) { toast(e.message, 'err'); } }, 'btn-ghost', !running);
+    act('Edit network', () => editNetwork(s), 'btn-ghost', !running);
     act('▤ Logs', () => selectServer(s));
     c.appendChild(actions);
     return c;
+  }
+
+  function editNetwork(s) {
+    const m = modal('Edit server network');
+    const port = BMUtil.el('input', { type: 'number', value: s.port, min: 1, max: 65535 });
+    const bind = BMUtil.el('select', {}, [BMUtil.el('option', { value: '127.0.0.1', text: 'Local only' }), BMUtil.el('option', { value: '0.0.0.0', text: 'LAN (unauthenticated)' })]);
+    bind.value = s.bind;
+    m.appendChild(BMUtil.el('p', { text: 'Applying restarts this server with its saved inference parameters. LAN binding exposes the API without authentication.' }));
+    m.appendChild(port); m.appendChild(bind);
+    m.appendChild(BMUtil.el('button', { text: 'Cancel', onclick: closeModal }));
+    const apply = BMUtil.el('button', { text: 'Apply and restart', onclick: async () => {
+      apply.disabled = true;
+      try { await window.Bridge.servers.restart(s.id, { port: Number(port.value), bind: bind.value }); closeModal(); reload(); }
+      catch (e) { toast(e.message, 'err'); apply.disabled = false; }
+    } });
+    m.appendChild(apply);
   }
 
   function selectServer(s) {
@@ -165,6 +183,7 @@ const ServersView = (() => {
     form.appendChild(BMUtil.el('p', { class: 'dim small', text: 'The context length you set here is passed to the engine exactly as configured — Black Mirror never silently reduces it.' }));
 
     (async () => {
+      state.config = await window.Bridge.getConfig();
       const [engines, models] = await Promise.all([window.Bridge.engines.status(), window.Bridge.library.list({ onlyValid: true })]);
       const usable = engines.filter(e => e.status === 'available');
 
@@ -182,7 +201,7 @@ const ServersView = (() => {
         const eng = usable.find(e => e.id === engineSel.value);
         if (eng && (eng.family === 'ollama' || eng.family === 'lemonade')) {
           try {
-            const list = await window.Bridge.servers.engineModels(eng.id);
+            const list = await window.Bridge.servers.engineModels(eng.id, { port: Number(portInput.value), bind: bindSel.value });
             for (const m of (list || [])) modelSel.appendChild(BMUtil.el('option', { value: m.id, text: `${m.displayName || m.id}${m.parameterSize ? ' · ' + m.parameterSize : ''}${m.quant ? ' · ' + m.quant : ''}` }));
           } catch (e) {
             modelSel.appendChild(BMUtil.el('option', { value: '__none__', text: `(service offline: ${e.message})` }));
@@ -196,7 +215,7 @@ const ServersView = (() => {
         }
         assessNow();
       };
-      engineSel.addEventListener('change', fillModels);
+      engineSel.addEventListener('change', async () => { await fillModels(); await applyModelProfile(); });
 
       // params grid from schema + config defaults
       const paramsGrid = BMUtil.el('div', { class: 'launch-grid' });
@@ -232,7 +251,20 @@ const ServersView = (() => {
           for (const c of (cands || [])) mmprojSel.appendChild(BMUtil.el('option', { value: c.path, text: c.fileName }));
         } catch (_) { /* preview */ }
       };
-      modelSel.addEventListener('change', refreshMmproj);
+      const applyModelProfile = async () => {
+        const selected = modelSel.value;
+        const profile = models.some(m => m.path === selected) ? await window.Bridge.library.getProfile(selected) : null;
+        if (modelSel.value !== selected) return;
+        await refreshMmproj();
+        if (modelSel.value !== selected) return;
+        for (const f of state.paramSchema) {
+          const value = profile?.[f.id] ?? state.config.params?.[f.id] ?? f.default;
+          if (f.type === 'bool') inputs[f.id].checked = !!value;
+          else if (value != null) inputs[f.id].value = value;
+        }
+        await assessNow();
+      };
+      modelSel.addEventListener('change', () => applyModelProfile().catch(e => toast(e.message, 'err')));
 
       // network
       const netGrid = BMUtil.el('div', { class: 'launch-grid' });
@@ -241,6 +273,7 @@ const ServersView = (() => {
         BMUtil.el('option', { value: '127.0.0.1', text: '127.0.0.1 — this machine only (recommended)' }),
         BMUtil.el('option', { value: '0.0.0.0', text: '0.0.0.0 — expose to LAN (no auth!)' })
       ]);
+      bindSel.value = state.config.network.bind || '127.0.0.1';
       netGrid.appendChild(BMUtil.el('label', {}, [BMUtil.el('span', { text: 'API port' }), portInput]));
       netGrid.appendChild(BMUtil.el('label', {}, [BMUtil.el('span', { text: 'Network binding' }), bindSel]));
 
@@ -266,7 +299,9 @@ const ServersView = (() => {
       form.appendChild(paramsGrid);
       form.appendChild(netGrid);
       form.appendChild(assessBox);
+      portInput.addEventListener('change', async () => { if (['ollama','lemonade'].includes(usable.find(e => e.id === engineSel.value)?.family)) { await fillModels(); await applyModelProfile(); } });
       await fillModels();
+      await applyModelProfile();
 
       const launch = BMUtil.el('button', { class: 'btn btn-primary', text: '▶ Launch server', onclick: async () => {
         const params = {};
