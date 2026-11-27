@@ -213,7 +213,7 @@ describe('Engine installer (mock network)', () => {
     if (process.platform === 'win32') {
       const r = spawnSync('powershell.exe', [
         '-NoProfile', '-NonInteractive', '-Command',
-        `Compress-Archive -LiteralPath @('${exe.replace(/'/g, "''")}','${path.join(tmp, 'llama-server').replace(/'/g, "''")}') -DestinationPath '${zip.replace(/'/g, "''")}' -Force`
+        `Add-Type -AssemblyName System.IO.Compression.FileSystem; [System.IO.Compression.ZipFile]::CreateFromDirectory('${tmp.replace(/'/g, "''")}', '${(tmp + '.zip').replace(/'/g, "''")}'); Move-Item -LiteralPath '${(tmp + '.zip').replace(/'/g, "''")}' -Destination '${zip.replace(/'/g, "''")}'`
       ], { windowsHide: true, encoding: 'utf8', timeout: 60000 });
       if (r.status !== 0) throw new Error(`Compress-Archive failed: ${r.stderr || r.stdout || r.status}`);
     } else {
@@ -283,7 +283,7 @@ describe('Engine installer (mock network)', () => {
     assert.equal(reg2.state('llamacpp-vulkan').versions.length, 1);
 
     // uninstall refuses paths outside engines dir
-    reg2.registerVersion('llamacpp-vulkan', 'evil', '/etc', { activate: false });
+    reg2.registerVersion('llamacpp-vulkan', 'evil', zipTmp, { activate: false });
     assert.throws(() => installer.uninstall('llamacpp-vulkan', 'evil'), /Refusing to remove/);
     // uninstall real version works
     installer.uninstall('llamacpp-vulkan', 'b12359');
