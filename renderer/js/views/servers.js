@@ -198,7 +198,7 @@ const ServersView = (() => {
         }
         assessNow();
       };
-      engineSel.addEventListener('change', fillModels);
+      engineSel.addEventListener('change', async () => { await fillModels(); await applyModelProfile(); });
 
       // params grid from schema + config defaults
       const paramsGrid = BMUtil.el('div', { class: 'launch-grid' });
@@ -234,7 +234,20 @@ const ServersView = (() => {
           for (const c of (cands || [])) mmprojSel.appendChild(BMUtil.el('option', { value: c.path, text: c.fileName }));
         } catch (_) { /* preview */ }
       };
-      modelSel.addEventListener('change', refreshMmproj);
+      const applyModelProfile = async () => {
+        const selected = modelSel.value;
+        const profile = models.some(m => m.path === selected) ? await window.Bridge.library.getProfile(selected) : null;
+        if (modelSel.value !== selected) return;
+        await refreshMmproj();
+        if (modelSel.value !== selected) return;
+        for (const f of state.paramSchema) {
+          const value = profile?.[f.id] ?? state.config.params?.[f.id] ?? f.default;
+          if (f.type === 'bool') inputs[f.id].checked = !!value;
+          else if (value != null) inputs[f.id].value = value;
+        }
+        await assessNow();
+      };
+      modelSel.addEventListener('change', () => applyModelProfile().catch(e => toast(e.message, 'err')));
 
       // network
       const netGrid = BMUtil.el('div', { class: 'launch-grid' });
@@ -270,6 +283,7 @@ const ServersView = (() => {
       form.appendChild(netGrid);
       form.appendChild(assessBox);
       await fillModels();
+      await applyModelProfile();
 
       const launch = BMUtil.el('button', { class: 'btn btn-primary', text: '▶ Launch server', onclick: async () => {
         const params = {};
