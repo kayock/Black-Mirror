@@ -206,7 +206,7 @@ describe('Engine installer (mock network)', () => {
     // name matching the host platform (llama-server on POSIX, .exe on Windows).
     const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'bm-zip-'));
     const exe = path.join(tmp, 'llama-server.exe');
-    fs.writeFileSync(exe, 'MZfakebinary');
+    const pe = Buffer.alloc(128); pe.writeUInt16LE(0x5a4d, 0); pe.writeUInt32LE(64, 60); pe.writeUInt32LE(0x4550, 64); pe.writeUInt16LE(0x8664, 68); pe.writeUInt16LE(0x20b, 88); fs.writeFileSync(exe, pe);
     fs.writeFileSync(path.join(tmp, 'llama-server'), '#!/bin/sh\nMZfakebinary');
     const zip = path.join(tmp, 'fake.zip');
     const { spawnSync, execSync } = require('child_process');
