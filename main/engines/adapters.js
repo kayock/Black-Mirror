@@ -83,6 +83,7 @@ class LlamaCppAdapter {
     if (active) {
       const p = findExecutable(require('path').join(active, exe));
       if (p) return p;
+      throw new EngineError(`Selected engine executable is missing in ${active}`, 'binary-missing');
     }
     // 3) PATH
     const onPath = findExecutable(exe);
