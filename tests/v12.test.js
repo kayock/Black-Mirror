@@ -197,7 +197,7 @@ describe('Process ownership verification & recovery', () => {
     const logger = new Logger(path.join(dir, 'logs'));
     // Child whose command line contains the recorded model path (as a real
     // engine launch would) — the identity evidence ownership requires.
-    const child = spawn(process.execPath, ['-e', 'const model="/m/own.gguf"; setInterval(()=>{},1000)'], { stdio: 'ignore' });
+    const child = spawn(process.execPath, ['-e', 'setInterval(()=>{},1000)', '--', '/m/own.gguf'], { stdio: 'ignore' });
     child.unref();
     await new Promise(r => setTimeout(r, 250));
     const snap = ownership.snapshotProcess(child.pid);
